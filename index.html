@@ -118,6 +118,13 @@
   }
   .type-chip.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+  .date-row { display: flex; gap: 10px; }
+  .date-row input { flex: 1; }
+  .checkbox-row {
+    display: flex !important; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--sub); margin-top: 8px; cursor: pointer; font-weight: 600;
+  }
+  .checkbox-row input { width: auto; cursor: pointer; }
   .btn {
     padding: 9px 20px; border-radius: 8px; border: none; font-size: 14px;
     cursor: pointer; font-family: inherit; font-weight: 600;
@@ -226,6 +233,8 @@
     border-radius: 4px; padding: 1px 4px; margin-top: 2px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;
   }
+  .cal-ev.entry { background: var(--accent); color: #fff; }
+  .cal-ev.range-mid { border-radius: 0; opacity: .85; }
   .cal-ev.more { background: none; color: var(--sub); }
   .day-events { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
   .day-events h3 { font-size: 13.5px; margin-bottom: 10px; color: var(--sub); }
@@ -317,6 +326,18 @@
       <input type="text" id="customTypeInput" placeholder="例：座談会">
     </div>
     <div class="field">
+      <label>日程（任意）</label>
+      <div class="date-row">
+        <input type="date" id="addStartDate">
+        <input type="time" id="addTime">
+      </div>
+      <label class="checkbox-row"><input type="checkbox" id="addMultiDay"> 複数日にわたる（インターンなど）</label>
+      <div id="addEndDateWrap" style="display:none; margin-top:8px">
+        <label>終了日</label>
+        <input type="date" id="addEndDate">
+      </div>
+    </div>
+    <div class="field">
       <label>ステータス</label>
       <select id="addStatus">
         <option value="ongoing">進行中</option>
@@ -378,8 +399,17 @@ const esc = s => (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 /* ============ ホーム描画 ============ */
 function nextDateOf(entry) {
   const today = new Date().toISOString().slice(0, 10);
-  const future = entry.steps.filter(s => s.date && s.date >= today).map(s => s.date).sort();
-  return future[0] || null;
+  const dates = entry.steps.filter(s => s.date && s.date >= today).map(s => s.date);
+  if (entry.startDate && (entry.endDate || entry.startDate) >= today) {
+    dates.push(entry.startDate >= today ? entry.startDate : today);
+  }
+  return dates.sort()[0] || null;
+}
+
+function entryDateLabel(e) {
+  if (!e.startDate) return '';
+  const f = d => d.slice(5).replace('-', '/');
+  return e.endDate ? `${f(e.startDate)}〜${f(e.endDate)}` : f(e.startDate) + (e.time ? ' ' + e.time : '');
 }
 
 function renderHome() {
@@ -401,6 +431,7 @@ function renderHome() {
           <span class="type-badge">${esc(e.type)}</span>
         </div>
         <div class="entry-meta">
+          ${entryDateLabel(e) ? `<span>📅 ${entryDateLabel(e)}</span>` : ''}
           <span>📋 ステップ ${e.steps.length}件</span>
           ${next ? `<span>⏰ 次回 ${next.replace(/-/g, '/')}</span>` : ''}
         </div>
@@ -438,9 +469,17 @@ document.getElementById('openAddBtn').onclick = () => {
   document.getElementById('customTypeInput').value = '';
   document.getElementById('addStatus').value = 'ongoing';
   document.getElementById('customTypeField').style.display = 'none';
+  document.getElementById('addStartDate').value = '';
+  document.getElementById('addTime').value = '';
+  document.getElementById('addEndDate').value = '';
+  document.getElementById('addMultiDay').checked = false;
+  document.getElementById('addEndDateWrap').style.display = 'none';
   renderTypeOptions();
   document.getElementById('addOverlay').classList.add('open');
   document.getElementById('addName').focus();
+};
+document.getElementById('addMultiDay').onchange = ev => {
+  document.getElementById('addEndDateWrap').style.display = ev.target.checked ? '' : 'none';
 };
 document.getElementById('addCancel').onclick = () => document.getElementById('addOverlay').classList.remove('open');
 
@@ -454,9 +493,14 @@ document.getElementById('addSave').onclick = () => {
     if (!type) { alert('カスタム種類名を入力してください'); return; }
     if (!state.customTypes.includes(type) && !DEFAULT_TYPES.includes(type)) state.customTypes.push(type);
   }
+  const startDate = document.getElementById('addStartDate').value;
+  let endDate = document.getElementById('addMultiDay').checked ? document.getElementById('addEndDate').value : '';
+  if (!startDate || (endDate && endDate <= startDate)) endDate = '';
   const entry = {
     id: uid(), name, type,
     status: document.getElementById('addStatus').value,
+    startDate, endDate,
+    time: startDate ? document.getElementById('addTime').value : '',
     createdAt: new Date().toISOString(),
     steps: [],
   };
@@ -511,6 +555,14 @@ function renderDetail() {
       ${statusBtn('ongoing', '進行中', 'ongoing')}
       ${statusBtn('upcoming', '予定', 'upcoming')}
       ${statusBtn('done', '振り返り', 'done')}
+    </div>
+    <div style="margin-bottom:18px">
+      <span class="mini-label">日程（開始日 ／ 時間 ／ 終了日 ※複数日の場合のみ）</span>
+      <div class="date-row">
+        <input type="date" data-efield="startDate" value="${esc(e.startDate)}">
+        <input type="time" data-efield="time" value="${esc(e.time)}">
+        <input type="date" data-efield="endDate" value="${esc(e.endDate)}" title="終了日">
+      </div>
     </div>
     <div id="stepsArea">${stepsHtml || '<div class="empty-hint">下のボタンから選考ステップを追加しましょう</div>'}</div>
     <div class="add-step-row">${addBtns}</div>
@@ -577,6 +629,15 @@ function renderStep(e, s) {
 }
 
 function bindStepInputs() {
+  document.querySelectorAll('#detailModal [data-efield]').forEach(el => {
+    el.addEventListener('input', () => {
+      const e = getEntry(); if (!e) return;
+      e[el.dataset.efield] = el.value;
+      if (e.endDate && e.startDate && e.endDate <= e.startDate) e.endDate = '';
+      save();
+      renderCalendar();
+    });
+  });
   document.querySelectorAll('#detailModal [data-sid]').forEach(el => {
     el.addEventListener('input', () => {
       const e = getEntry(); if (!e) return;
@@ -652,9 +713,29 @@ let calYear, calMonth, selectedDay = null;
 
 function allEvents() {
   const evs = [];
-  state.entries.forEach(e => e.steps.forEach(s => {
-    if (s.date) evs.push({ date: s.date, time: s.time || '', name: e.name, kind: s.kind, entryId: e.id });
-  }));
+  state.entries.forEach(e => {
+    if (e.startDate) {
+      const end = (e.endDate && e.endDate > e.startDate) ? e.endDate : e.startDate;
+      const isRange = end !== e.startDate;
+      let d = new Date(e.startDate + 'T00:00:00');
+      const endD = new Date(end + 'T00:00:00');
+      let guard = 0;
+      while (d <= endD && guard++ < 92) {
+        const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        evs.push({
+          date: ds, time: ds === e.startDate ? (e.time || '') : '',
+          name: e.name, kind: e.type, entryId: e.id,
+          isEntry: true, isRange,
+          rangePos: !isRange ? '' : ds === e.startDate ? 'start' : ds === end ? 'end' : 'mid',
+          rangeLabel: isRange ? `${e.startDate.slice(5).replace('-', '/')}〜${end.slice(5).replace('-', '/')}` : '',
+        });
+        d.setDate(d.getDate() + 1);
+      }
+    }
+    e.steps.forEach(s => {
+      if (s.date) evs.push({ date: s.date, time: s.time || '', name: e.name, kind: s.kind, entryId: e.id });
+    });
+  });
   evs.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   return evs;
 }
@@ -685,7 +766,7 @@ function renderCalendar() {
     const shown = dayEvs.slice(0, 2);
     html += `<div class="cal-cell ${other ? 'other-month' : ''} ${ds === todayStr ? 'today' : ''} ${ds === selectedDay ? 'selected' : ''}" data-date="${ds}">
       <span class="day-num">${d.getDate()}</span>
-      ${shown.map(ev => `<div class="cal-ev">${esc(ev.name)}</div>`).join('')}
+      ${shown.map(ev => `<div class="cal-ev ${ev.isEntry ? 'entry' : ''} ${ev.rangePos === 'mid' ? 'range-mid' : ''}">${ev.rangePos === 'mid' || ev.rangePos === 'end' ? '┈ ' : ''}${esc(ev.name)}</div>`).join('')}
       ${dayEvs.length > 2 ? `<div class="cal-ev more">他${dayEvs.length - 2}件</div>` : ''}
     </div>`;
   }
@@ -701,8 +782,8 @@ function renderCalendar() {
     panel.innerHTML = `<h3>${selectedDay.replace(/-/g, '/')} の予定</h3>` +
       (dayEvs.length
         ? dayEvs.map(ev => `<div class="day-ev-item" onclick="openDetail('${ev.entryId}')">
-            <span class="day-ev-time">${ev.time || '--:--'}</span>
-            <div><div class="day-ev-name">${esc(ev.name)}</div><div class="day-ev-kind">${esc(ev.kind)}</div></div>
+            <span class="day-ev-time">${ev.isRange ? '期間' : (ev.time || '--:--')}</span>
+            <div><div class="day-ev-name">${esc(ev.name)}</div><div class="day-ev-kind">${esc(ev.kind)}${ev.rangeLabel ? '・' + ev.rangeLabel : ''}</div></div>
           </div>`).join('')
         : '<div class="no-events">この日の予定はありません</div>');
   } else {
