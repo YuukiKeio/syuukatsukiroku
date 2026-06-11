@@ -120,11 +120,25 @@
   .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
   .date-row { display: flex; gap: 10px; }
   .date-row input { flex: 1; }
-  .checkbox-row {
-    display: flex !important; align-items: center; gap: 6px;
-    font-size: 13px; color: var(--sub); margin-top: 8px; cursor: pointer; font-weight: 600;
+  .dt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .dt-row .dt-label { font-size: 12px; color: var(--sub); width: 32px; font-weight: 600; flex-shrink: 0; }
+  .dt-row input { flex: 1; min-width: 0; }
+  .result-badge {
+    font-size: 11px; padding: 2px 10px; border-radius: 999px;
+    background: var(--green-soft); color: var(--green); white-space: nowrap; font-weight: 700;
+    border: 1px solid #a7f3d0;
   }
-  .checkbox-row input { width: auto; cursor: pointer; }
+  .type-chip.mark-on { background: var(--green); border-color: var(--green); color: #fff; }
+  .done-btn {
+    width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--line);
+    background: #fff; color: transparent; cursor: pointer; font-size: 13px; line-height: 1;
+    flex-shrink: 0; transition: all .15s;
+  }
+  .done-btn:hover { border-color: var(--green); color: #d1d5db; }
+  .done-btn.on { background: var(--green); border-color: var(--green); color: #fff; }
+  .step-card.done .step-kind { color: var(--sub); }
+  .step-card.done .step-head { background: var(--green-soft); }
+  .loc-link { font-size: 12px; color: var(--accent); margin-top: 4px; display: inline-block; word-break: break-all; }
   .btn {
     padding: 9px 20px; border-radius: 8px; border: none; font-size: 14px;
     cursor: pointer; font-family: inherit; font-weight: 600;
@@ -327,14 +341,26 @@
     </div>
     <div class="field">
       <label>日程（任意）</label>
-      <div class="date-row">
+      <div class="dt-row">
+        <span class="dt-label">開始</span>
         <input type="date" id="addStartDate">
         <input type="time" id="addTime">
       </div>
-      <label class="checkbox-row"><input type="checkbox" id="addMultiDay"> 複数日にわたる（インターンなど）</label>
-      <div id="addEndDateWrap" style="display:none; margin-top:8px">
-        <label>終了日</label>
+      <div class="dt-row">
+        <span class="dt-label">終了</span>
         <input type="date" id="addEndDate">
+        <input type="time" id="addEndTime">
+      </div>
+    </div>
+    <div class="field">
+      <label>場所（任意）</label>
+      <div class="type-options" id="locOptions">
+        <button class="type-chip" data-loc="">なし</button>
+        <button class="type-chip" data-loc="online">オンライン</button>
+        <button class="type-chip" data-loc="offline">対面</button>
+      </div>
+      <div id="locValueWrap" style="display:none; margin-top:8px">
+        <input type="text" id="addLocValue" placeholder="">
       </div>
     </div>
     <div class="field">
@@ -362,7 +388,8 @@
 
 /* ============ データ ============ */
 const STORAGE_KEY = 'syuukatsu-kiroku-v1';
-const DEFAULT_TYPES = ['セミナー', 'ワークショップ', '説明会', 'オープンカンパニー', '本選考', 'インターン'];
+const DEFAULT_TYPES = ['セミナー', 'ワークショップ', '説明会', 'オープンカンパニー', '本選考', 'インターン', '夏インターン', '冬インターン'];
+const MARKS = ['ES通過', '参加決定'];
 const STEP_KINDS = {
   'ES':                     { questions: true,  qTags: false, note: false },
   '動画視聴':                { questions: false, qTags: false, note: true  },
@@ -409,7 +436,15 @@ function nextDateOf(entry) {
 function entryDateLabel(e) {
   if (!e.startDate) return '';
   const f = d => d.slice(5).replace('-', '/');
-  return e.endDate ? `${f(e.startDate)}〜${f(e.endDate)}` : f(e.startDate) + (e.time ? ' ' + e.time : '');
+  if (e.endDate) return `${f(e.startDate)}〜${f(e.endDate)}`;
+  let t = e.time ? ' ' + e.time : '';
+  if (e.time && e.endTime) t += '〜' + e.endTime;
+  return f(e.startDate) + t;
+}
+
+function locLabel(e) {
+  if (!e.locType) return '';
+  return e.locType === 'online' ? '🔗 オンライン' : '📍 対面';
 }
 
 function renderHome() {
@@ -425,14 +460,19 @@ function renderHome() {
     }
     list.innerHTML = arr.map(e => {
       const next = nextDateOf(e);
+      const doneSteps = e.steps.filter(s => s.done).length;
       return `<div class="entry-card" onclick="openDetail('${e.id}')">
         <div class="top">
           <span class="entry-name">${esc(e.name)}</span>
-          <span class="type-badge">${esc(e.type)}</span>
+          <span style="display:flex; gap:6px; align-items:center">
+            ${(e.marks || []).map(m => `<span class="result-badge">✓ ${esc(m)}</span>`).join('')}
+            <span class="type-badge">${esc(e.type)}</span>
+          </span>
         </div>
         <div class="entry-meta">
           ${entryDateLabel(e) ? `<span>📅 ${entryDateLabel(e)}</span>` : ''}
-          <span>📋 ステップ ${e.steps.length}件</span>
+          ${locLabel(e) ? `<span>${locLabel(e)}</span>` : ''}
+          <span>📋 ステップ ${doneSteps}/${e.steps.length}件</span>
           ${next ? `<span>⏰ 次回 ${next.replace(/-/g, '/')}</span>` : ''}
         </div>
       </div>`;
@@ -472,15 +512,33 @@ document.getElementById('openAddBtn').onclick = () => {
   document.getElementById('addStartDate').value = '';
   document.getElementById('addTime').value = '';
   document.getElementById('addEndDate').value = '';
-  document.getElementById('addMultiDay').checked = false;
-  document.getElementById('addEndDateWrap').style.display = 'none';
+  document.getElementById('addEndTime').value = '';
+  document.getElementById('addLocValue').value = '';
+  selectedLoc = '';
+  updateLocUI();
   renderTypeOptions();
   document.getElementById('addOverlay').classList.add('open');
   document.getElementById('addName').focus();
 };
-document.getElementById('addMultiDay').onchange = ev => {
-  document.getElementById('addEndDateWrap').style.display = ev.target.checked ? '' : 'none';
-};
+
+/* 開始日を入れたら終了日の初期値も合わせる（Appleカレンダー風） */
+document.getElementById('addStartDate').addEventListener('change', ev => {
+  const end = document.getElementById('addEndDate');
+  if (ev.target.value && (!end.value || end.value < ev.target.value)) end.value = ev.target.value;
+});
+
+let selectedLoc = '';
+function updateLocUI() {
+  document.querySelectorAll('#locOptions .type-chip').forEach(b =>
+    b.classList.toggle('selected', b.dataset.loc === selectedLoc));
+  const wrap = document.getElementById('locValueWrap');
+  wrap.style.display = selectedLoc ? '' : 'none';
+  document.getElementById('addLocValue').placeholder =
+    selectedLoc === 'online' ? 'URLを貼り付け（Zoom・Teamsなど）' : '住所・会場名を貼り付け';
+}
+document.querySelectorAll('#locOptions .type-chip').forEach(b => {
+  b.onclick = () => { selectedLoc = b.dataset.loc; updateLocUI(); };
+});
 document.getElementById('addCancel').onclick = () => document.getElementById('addOverlay').classList.remove('open');
 
 document.getElementById('addSave').onclick = () => {
@@ -494,13 +552,18 @@ document.getElementById('addSave').onclick = () => {
     if (!state.customTypes.includes(type) && !DEFAULT_TYPES.includes(type)) state.customTypes.push(type);
   }
   const startDate = document.getElementById('addStartDate').value;
-  let endDate = document.getElementById('addMultiDay').checked ? document.getElementById('addEndDate').value : '';
-  if (!startDate || (endDate && endDate <= startDate)) endDate = '';
+  let endDate = document.getElementById('addEndDate').value;
+  if (!startDate || (endDate && endDate < startDate)) endDate = '';
+  if (endDate === startDate) endDate = '';
   const entry = {
     id: uid(), name, type,
     status: document.getElementById('addStatus').value,
     startDate, endDate,
     time: startDate ? document.getElementById('addTime').value : '',
+    endTime: startDate ? document.getElementById('addEndTime').value : '',
+    locType: selectedLoc,
+    locValue: selectedLoc ? document.getElementById('addLocValue').value.trim() : '',
+    marks: [],
     createdAt: new Date().toISOString(),
     steps: [],
   };
@@ -556,12 +619,37 @@ function renderDetail() {
       ${statusBtn('upcoming', '予定', 'upcoming')}
       ${statusBtn('done', '振り返り', 'done')}
     </div>
-    <div style="margin-bottom:18px">
-      <span class="mini-label">日程（開始日 ／ 時間 ／ 終了日 ※複数日の場合のみ）</span>
-      <div class="date-row">
+    <div style="margin-bottom:14px">
+      <span class="mini-label">日程</span>
+      <div class="dt-row">
+        <span class="dt-label">開始</span>
         <input type="date" data-efield="startDate" value="${esc(e.startDate)}">
         <input type="time" data-efield="time" value="${esc(e.time)}">
-        <input type="date" data-efield="endDate" value="${esc(e.endDate)}" title="終了日">
+      </div>
+      <div class="dt-row">
+        <span class="dt-label">終了</span>
+        <input type="date" data-efield="endDate" value="${esc(e.endDate)}">
+        <input type="time" data-efield="endTime" value="${esc(e.endTime)}">
+      </div>
+    </div>
+    <div style="margin-bottom:14px">
+      <span class="mini-label">場所</span>
+      <div class="type-options" style="margin-bottom:8px">
+        <button class="type-chip ${!e.locType ? 'selected' : ''}" onclick="setLocType('')">なし</button>
+        <button class="type-chip ${e.locType === 'online' ? 'selected' : ''}" onclick="setLocType('online')">オンライン</button>
+        <button class="type-chip ${e.locType === 'offline' ? 'selected' : ''}" onclick="setLocType('offline')">対面</button>
+      </div>
+      ${e.locType ? `
+        <input type="text" data-efield="locValue" value="${esc(e.locValue)}"
+          placeholder="${e.locType === 'online' ? 'URLを貼り付け（Zoom・Teamsなど）' : '住所・会場名を貼り付け'}">
+        ${e.locType === 'online' && /^https?:\/\//.test(e.locValue || '') ? `<a class="loc-link" href="${esc(e.locValue)}" target="_blank" rel="noopener">🔗 リンクを開く</a>` : ''}
+        ${e.locType === 'offline' && e.locValue ? `<a class="loc-link" href="https://www.google.com/maps/search/${encodeURIComponent(e.locValue)}" target="_blank" rel="noopener">📍 地図で見る</a>` : ''}
+      ` : ''}
+    </div>
+    <div style="margin-bottom:18px">
+      <span class="mini-label">結果</span>
+      <div class="type-options">
+        ${MARKS.map(m => `<button class="type-chip ${(e.marks || []).includes(m) ? 'mark-on' : ''}" onclick="toggleMark('${m}')">${(e.marks || []).includes(m) ? '✓ ' : ''}${m}</button>`).join('')}
       </div>
     </div>
     <div id="stepsArea">${stepsHtml || '<div class="empty-hint">下のボタンから選考ステップを追加しましょう</div>'}</div>
@@ -615,10 +703,11 @@ function renderStep(e, s) {
   }
 
   return `
-    <div class="step-card ${isOpen ? 'open' : ''}" id="step-${s.id}">
+    <div class="step-card ${isOpen ? 'open' : ''} ${s.done ? 'done' : ''}" id="step-${s.id}">
       <div class="step-head" onclick="toggleStep('${s.id}')">
         <div class="left">
           <span class="chev">▶</span>
+          <button class="done-btn ${s.done ? 'on' : ''}" title="完了にする" onclick="event.stopPropagation(); toggleStepDone('${s.id}')">✓</button>
           <span class="step-kind">${esc(s.kind)}</span>
           <span class="step-date-label">${dateLabel}</span>
         </div>
@@ -633,7 +722,7 @@ function bindStepInputs() {
     el.addEventListener('input', () => {
       const e = getEntry(); if (!e) return;
       e[el.dataset.efield] = el.value;
-      if (e.endDate && e.startDate && e.endDate <= e.startDate) e.endDate = '';
+      if (e.endDate && (!e.startDate || e.endDate <= e.startDate)) e.endDate = '';
       save();
       renderCalendar();
     });
@@ -664,6 +753,27 @@ function bindStepInputs() {
 }
 
 window.setStatus = val => { const e = getEntry(); if (e) { e.status = val; save(true); renderDetail(); } };
+window.setLocType = val => {
+  const e = getEntry(); if (!e) return;
+  if (e.locType !== val) e.locValue = '';
+  e.locType = val;
+  save(true); renderDetail();
+};
+window.toggleMark = m => {
+  const e = getEntry(); if (!e) return;
+  e.marks = e.marks || [];
+  e.marks.includes(m) ? e.marks = e.marks.filter(x => x !== m) : e.marks.push(m);
+  save(true); renderDetail();
+};
+window.toggleStepDone = sid => {
+  const e = getEntry(); if (!e) return;
+  const s = e.steps.find(x => x.id === sid); if (!s) return;
+  s.done = !s.done;
+  save(true);
+  const card = document.getElementById('step-' + sid);
+  card.classList.toggle('done', s.done);
+  card.querySelector('.done-btn').classList.toggle('on', s.done);
+};
 window.toggleStep = sid => {
   openSteps.has(sid) ? openSteps.delete(sid) : openSteps.add(sid);
   document.getElementById('step-' + sid).classList.toggle('open');
@@ -723,7 +833,7 @@ function allEvents() {
       while (d <= endD && guard++ < 92) {
         const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         evs.push({
-          date: ds, time: ds === e.startDate ? (e.time || '') : '',
+          date: ds, time: ds === e.startDate ? ((e.time || '') + (!isRange && e.time && e.endTime ? '〜' + e.endTime : '')) : '',
           name: e.name, kind: e.type, entryId: e.id,
           isEntry: true, isRange,
           rangePos: !isRange ? '' : ds === e.startDate ? 'start' : ds === end ? 'end' : 'mid',
