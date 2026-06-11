@@ -466,7 +466,7 @@
 
 /* ============ データ ============ */
 const STORAGE_KEY = 'syuukatsu-kiroku-v1';
-const DEFAULT_TYPES = ['セミナー', 'ワークショップ', '説明会', 'オープンカンパニー', '本選考', 'インターン', '夏インターン', '冬インターン'];
+const DEFAULT_TYPES = ['セミナー', 'ワークショップ', '説明会', 'オープンカンパニー', '本選考', 'インターン', '夏インターン', '冬インターン', 'OB・OG訪問'];
 const MARKS = ['ES通過', '参加決定'];
 const STEP_KINDS = {
   'ES':                     { questions: true,  qTags: false, note: false },
@@ -475,6 +475,7 @@ const STEP_KINDS = {
   '面接':                    { questions: true,  qTags: true,  note: true  },
   'グループディスカッション': { questions: false, qTags: false, note: true  },
   '動画選考':                { questions: true,  qTags: false, note: true  },
+  'インターン':              { questions: false, qTags: false, note: true  },
 };
 
 let state = load();
