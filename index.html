@@ -55,6 +55,19 @@
     transition: transform .15s;
   }
   .add-btn:hover { transform: scale(1.08); }
+  .gear-btn {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #fff; color: var(--sub); border: 1px solid var(--line);
+    font-size: 18px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s;
+  }
+  .gear-btn:hover { color: var(--text); border-color: var(--sub); }
+  .backup-note { font-size: 13px; color: var(--sub); margin-bottom: 18px; line-height: 1.8; }
+  .backup-note strong { color: var(--danger); }
+  .backup-actions { display: flex; flex-direction: column; gap: 10px; }
+  .btn-outline { background: #fff; border: 1px solid var(--line); color: var(--text); }
+  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
 
   /* ===== Sections ===== */
   .section { margin-top: 28px; }
@@ -270,6 +283,7 @@
     <div class="logo">就活<span>キロク</span></div>
     <div class="header-right">
       <span class="save-status" id="saveStatus">✓ 保存済み</span>
+      <button class="gear-btn" id="openBackupBtn" title="バックアップ">⚙</button>
       <button class="add-btn" id="openAddBtn" title="新規追加">＋</button>
     </div>
   </div>
@@ -378,6 +392,26 @@
   </div>
 </div>
 
+<!-- バックアップモーダル -->
+<div class="overlay" id="backupOverlay">
+  <div class="modal">
+    <h2>⚙ データのバックアップ</h2>
+    <p class="backup-note">
+      記録はこのブラウザ内（localStorage）に自動保存されています。<br>
+      <strong>別の端末・ブラウザには引き継がれない</strong>ため、定期的にエクスポートしてバックアップするのがおすすめです。
+      機種変更やブラウザのデータ削除の前には必ずエクスポートしてください。
+    </p>
+    <div class="backup-actions">
+      <button class="btn btn-primary" id="exportBtn">⬇ エクスポート（JSON保存）</button>
+      <button class="btn btn-outline" id="importBtn">⬆ インポート（復元）</button>
+      <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="backupClose">閉じる</button>
+    </div>
+  </div>
+</div>
+
 <!-- 詳細モーダル -->
 <div class="overlay" id="detailOverlay">
   <div class="modal detail-modal" id="detailModal"></div>
@@ -408,16 +442,20 @@ function load() {
   return { entries: [], customTypes: [] };
 }
 
-let saveTimer = null;
-function save(immediate) {
-  clearTimeout(saveTimer);
-  const doSave = () => {
+/* 即時保存：遅延なしでlocalStorageへ書き込む（モバイルで閉じてもデータが残る） */
+let indicatorTimer = null;
+function save() {
+  try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     const el = document.getElementById('saveStatus');
+    const t = new Date();
+    el.textContent = `✓ 保存済み ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
     el.classList.add('show');
-    setTimeout(() => el.classList.remove('show'), 1600);
-  };
-  if (immediate) doSave(); else saveTimer = setTimeout(doSave, 500);
+    clearTimeout(indicatorTimer);
+    indicatorTimer = setTimeout(() => el.classList.remove('show'), 2500);
+  } catch (err) {
+    alert('保存に失敗しました。プライベートブラウズモードでは保存できません。');
+  }
 }
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -450,6 +488,16 @@ function locLabel(e) {
 function renderHome() {
   const groups = { ongoing: [], upcoming: [], done: [] };
   state.entries.forEach(e => (groups[e.status] || groups.ongoing).push(e));
+
+  // 直近の予定が近い順に並べる（日程なしは後ろ）。振り返りは新しい日付順
+  const byNext = (a, b) => {
+    const da = nextDateOf(a), db = nextDateOf(b);
+    if (da && db) return da.localeCompare(db);
+    return da ? -1 : db ? 1 : 0;
+  };
+  groups.ongoing.sort(byNext);
+  groups.upcoming.sort(byNext);
+  groups.done.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
 
   const render = (listId, countId, arr, emptyMsg) => {
     document.getElementById(countId).textContent = arr.length;
@@ -915,9 +963,48 @@ document.getElementById('addOverlay').addEventListener('click', ev => {
   if (ev.target === ev.currentTarget) ev.currentTarget.classList.remove('open');
 });
 
-window.addEventListener('beforeunload', () => {
-  clearTimeout(saveTimer);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+/* ページを離れる・バックグラウンドに回る瞬間にも念のため保存（iOS Safari対策） */
+const flush = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {} };
+window.addEventListener('pagehide', flush);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+
+/* ===== バックアップ（エクスポート／インポート） ===== */
+document.getElementById('openBackupBtn').onclick = () => document.getElementById('backupOverlay').classList.add('open');
+document.getElementById('backupClose').onclick = () => document.getElementById('backupOverlay').classList.remove('open');
+document.getElementById('backupOverlay').addEventListener('click', ev => {
+  if (ev.target === ev.currentTarget) ev.currentTarget.classList.remove('open');
+});
+
+document.getElementById('exportBtn').onclick = () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `syuukatsu-kiroku-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+document.getElementById('importBtn').onclick = () => document.getElementById('importFile').click();
+document.getElementById('importFile').addEventListener('change', ev => {
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data || !Array.isArray(data.entries)) throw new Error('invalid');
+      if (!confirm(`バックアップから ${data.entries.length} 件の記録を読み込みます。\n現在のデータは上書きされます。よろしいですか？`)) return;
+      state = { entries: data.entries, customTypes: Array.isArray(data.customTypes) ? data.customTypes : [] };
+      save();
+      renderHome();
+      document.getElementById('backupOverlay').classList.remove('open');
+      alert('読み込みが完了しました');
+    } catch (err) {
+      alert('ファイルを読み込めませんでした。エクスポートしたJSONファイルを選んでください。');
+    }
+  };
+  reader.readAsText(file);
 });
 
 renderHome();
