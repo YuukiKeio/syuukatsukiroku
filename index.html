@@ -190,6 +190,36 @@
     background: var(--danger-soft); color: var(--danger); white-space: nowrap; font-weight: 700;
   }
   .char-count { text-align: right; font-size: 11px; color: var(--sub); margin-top: 2px; }
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px; margin-bottom: 12px;
+  }
+  .stat-card {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 14px 8px; text-align: center;
+  }
+  .stat-num { font-size: 26px; font-weight: 800; color: var(--accent); line-height: 1.2; }
+  .stat-num.green { color: var(--green); }
+  .stat-num.orange { color: var(--orange); }
+  .stat-label { font-size: 11.5px; color: var(--sub); font-weight: 600; margin-top: 2px; }
+  .stats-panel {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 16px 18px; margin-bottom: 12px;
+  }
+  .stats-panel h3 { font-size: 13px; color: var(--sub); margin-bottom: 12px; font-weight: 700; }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+  .bar-label {
+    width: 150px; font-size: 12.5px; font-weight: 600; flex-shrink: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  @media (max-width: 480px) { .bar-label { width: 100px; } }
+  .bar-track {
+    flex: 1; height: 14px; background: var(--bg); border-radius: 7px;
+    overflow: hidden; position: relative;
+  }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 7px; }
+  .bar-fill.done-part { background: var(--green); position: absolute; left: 0; top: 0; }
+  .bar-count { min-width: 72px; text-align: right; color: var(--sub); font-weight: 600; font-size: 12px; flex-shrink: 0; }
   .btn {
     padding: 9px 20px; border-radius: 8px; border: none; font-size: 14px;
     cursor: pointer; font-family: inherit; font-weight: 600;
@@ -360,6 +390,12 @@
       </div>
       <div class="card-list" id="listDone"></div>
     </div>
+  </div>
+
+  <!-- 統計 -->
+  <div class="section">
+    <div class="section-title">📊 統計</div>
+    <div id="statsArea"></div>
   </div>
 
   <!-- カレンダー -->
@@ -589,7 +625,78 @@ function renderHome() {
   render('listOngoing', 'countOngoing', groups.ongoing, 'まだありません。右上の＋から追加しましょう');
   render('listUpcoming', 'countUpcoming', groups.upcoming, '予定はありません');
   render('listDone', 'countDone', groups.done, 'まだありません');
+  renderStats();
   renderCalendar();
+}
+
+/* ============ 統計 ============ */
+function renderStats() {
+  const area = document.getElementById('statsArea');
+  const entries = state.entries;
+  if (!entries.length) {
+    area.innerHTML = '<div class="empty-hint">記録が増えると、ここに統計が表示されます</div>';
+    return;
+  }
+
+  const byType = {};
+  const stepStats = {};
+  let esPass = 0, kettei = 0, stepsTotal = 0, stepsDone = 0, doneCount = 0;
+  entries.forEach(e => {
+    byType[e.type] = (byType[e.type] || 0) + 1;
+    if (e.status === 'done') doneCount++;
+    if ((e.marks || []).includes('ES通過')) esPass++;
+    if ((e.marks || []).includes('参加決定')) kettei++;
+    e.steps.forEach(s => {
+      stepsTotal++;
+      if (s.done) stepsDone++;
+      stepStats[s.kind] = stepStats[s.kind] || { total: 0, done: 0 };
+      stepStats[s.kind].total++;
+      if (s.done) stepStats[s.kind].done++;
+    });
+  });
+  const progress = stepsTotal ? Math.round(stepsDone / stepsTotal * 100) : 0;
+
+  const cards = `
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-num">${entries.length}</div><div class="stat-label">全エントリー</div></div>
+      <div class="stat-card"><div class="stat-num green">${esPass}</div><div class="stat-label">ES通過</div></div>
+      <div class="stat-card"><div class="stat-num green">${kettei}</div><div class="stat-label">参加決定</div></div>
+      <div class="stat-card"><div class="stat-num orange">${progress}%</div><div class="stat-label">ステップ完了率<br>（${stepsDone}/${stepsTotal}）</div></div>
+    </div>`;
+
+  const typeRows = Object.entries(byType).sort((a, b) => b[1] - a[1]);
+  const typeMax = typeRows[0][1];
+  const typePanel = `
+    <div class="stats-panel">
+      <h3>種類別の内訳</h3>
+      ${typeRows.map(([t, n]) => `
+        <div class="bar-row">
+          <span class="bar-label">${esc(t)}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${n / typeMax * 100}%"></div></div>
+          <span class="bar-count">${n}件</span>
+        </div>`).join('')}
+    </div>`;
+
+  const stepRows = Object.entries(stepStats).sort((a, b) => b[1].total - a[1].total);
+  let stepPanel = '';
+  if (stepRows.length) {
+    const stepMax = stepRows[0][1].total;
+    stepPanel = `
+      <div class="stats-panel">
+        <h3>ステップ別の件数 <span style="font-weight:400">（<span style="color:var(--green)">■</span> 完了分）</span></h3>
+        ${stepRows.map(([k, st]) => `
+          <div class="bar-row">
+            <span class="bar-label">${esc(k)}</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:${st.total / stepMax * 100}%"></div>
+              <div class="bar-fill done-part" style="width:${st.done / stepMax * 100}%"></div>
+            </div>
+            <span class="bar-count">${st.done}/${st.total}件</span>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  area.innerHTML = cards + typePanel + stepPanel;
 }
 
 /* ============ 新規追加 ============ */
