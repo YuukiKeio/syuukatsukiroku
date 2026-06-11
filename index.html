@@ -18,8 +18,37 @@
     --green-soft: #ecfdf5;
     --orange: #d97706;
     --orange-soft: #fffbeb;
+    --card2: #ffffff;
+    --head: #fafafa;
+    --hover: #f3f4f6;
+    --header-bg: rgba(255,255,255,.92);
+    --muted-day: #c4c8cf;
+    --danger-soft: #fef2f2;
+    --green-line: #a7f3d0;
     --radius: 12px;
     --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  }
+  body.dark {
+    --bg: #12151a;
+    --card: #1c2128;
+    --card2: #242a32;
+    --text: #e6e8eb;
+    --sub: #9aa3af;
+    --line: #333a44;
+    --accent: #4c8dff;
+    --accent-soft: #1c2a45;
+    --danger: #f87171;
+    --green: #34d399;
+    --green-soft: #122e25;
+    --orange: #fbbf24;
+    --orange-soft: #2e2510;
+    --head: #21262e;
+    --hover: #2a313a;
+    --header-bg: rgba(18,21,26,.92);
+    --muted-day: #4b5563;
+    --danger-soft: #3a2022;
+    --green-line: #1f5b45;
+    --shadow: 0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -33,7 +62,7 @@
   /* ===== Header ===== */
   header {
     position: sticky; top: 0; z-index: 50;
-    background: rgba(255,255,255,.92);
+    background: var(--header-bg);
     backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--line);
   }
@@ -57,7 +86,7 @@
   .add-btn:hover { transform: scale(1.08); }
   .gear-btn {
     width: 40px; height: 40px; border-radius: 50%;
-    background: #fff; color: var(--sub); border: 1px solid var(--line);
+    background: var(--card2); color: var(--sub); border: 1px solid var(--line);
     font-size: 18px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     transition: all .15s;
@@ -66,7 +95,7 @@
   .backup-note { font-size: 13px; color: var(--sub); margin-bottom: 18px; line-height: 1.8; }
   .backup-note strong { color: var(--danger); }
   .backup-actions { display: flex; flex-direction: column; gap: 10px; }
-  .btn-outline { background: #fff; border: 1px solid var(--line); color: var(--text); }
+  .btn-outline { background: var(--card2); border: 1px solid var(--line); color: var(--text); }
   .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
 
   /* ===== Sections ===== */
@@ -120,14 +149,14 @@
   .field label { display: block; font-size: 13px; font-weight: 600; color: var(--sub); margin-bottom: 6px; }
   input[type="text"], input[type="date"], input[type="time"], textarea, select {
     width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px;
-    font-size: 14px; font-family: inherit; background: #fff; color: var(--text);
+    font-size: 14px; font-family: inherit; background: var(--card2); color: var(--text);
   }
   input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
   textarea { resize: vertical; min-height: 80px; }
   .type-options { display: flex; flex-wrap: wrap; gap: 8px; }
   .type-chip {
     padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line);
-    background: #fff; font-size: 13px; cursor: pointer; transition: all .12s;
+    background: var(--card2); font-size: 13px; cursor: pointer; transition: all .12s; color: var(--text);
   }
   .type-chip.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
@@ -139,12 +168,12 @@
   .result-badge {
     font-size: 11px; padding: 2px 10px; border-radius: 999px;
     background: var(--green-soft); color: var(--green); white-space: nowrap; font-weight: 700;
-    border: 1px solid #a7f3d0;
+    border: 1px solid var(--green-line);
   }
   .type-chip.mark-on { background: var(--green); border-color: var(--green); color: #fff; }
   .done-btn {
     width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--line);
-    background: #fff; color: transparent; cursor: pointer; font-size: 13px; line-height: 1;
+    background: var(--card2); color: transparent; cursor: pointer; font-size: 13px; line-height: 1;
     flex-shrink: 0; transition: all .15s;
   }
   .done-btn:hover { border-color: var(--green); color: #d1d5db; }
@@ -152,6 +181,15 @@
   .step-card.done .step-kind { color: var(--sub); }
   .step-card.done .step-head { background: var(--green-soft); }
   .loc-link { font-size: 12px; color: var(--accent); margin-top: 4px; display: inline-block; word-break: break-all; }
+  .search-wrap { margin-top: 20px; }
+  .search-wrap input {
+    border-radius: 999px; padding: 10px 18px; box-shadow: var(--shadow); border-color: transparent;
+  }
+  .urgent-badge {
+    font-size: 11px; padding: 2px 10px; border-radius: 999px;
+    background: var(--danger-soft); color: var(--danger); white-space: nowrap; font-weight: 700;
+  }
+  .char-count { text-align: right; font-size: 11px; color: var(--sub); margin-top: 2px; }
   .btn {
     padding: 9px 20px; border-radius: 8px; border: none; font-size: 14px;
     cursor: pointer; font-family: inherit; font-weight: 600;
@@ -161,7 +199,7 @@
   .btn-ghost { background: transparent; color: var(--sub); }
   .btn-ghost:hover { background: var(--bg); }
   .btn-danger-ghost { background: transparent; color: var(--danger); }
-  .btn-danger-ghost:hover { background: #fef2f2; }
+  .btn-danger-ghost:hover { background: var(--danger-soft); }
 
   /* ===== Detail panel ===== */
   .detail-modal { max-width: 720px; }
@@ -174,7 +212,7 @@
   .status-tabs { display: flex; gap: 6px; margin: 14px 0 20px; }
   .status-tab {
     padding: 5px 14px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
-    border: 1px solid var(--line); background: #fff; font-weight: 600; color: var(--sub);
+    border: 1px solid var(--line); background: var(--card2); font-weight: 600; color: var(--sub);
   }
   .status-tab.active-ongoing { background: var(--accent); border-color: var(--accent); color: #fff; }
   .status-tab.active-upcoming { background: var(--orange); border-color: var(--orange); color: #fff; }
@@ -186,9 +224,9 @@
   }
   .step-head {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 14px; cursor: pointer; background: #fafafa;
+    padding: 12px 14px; cursor: pointer; background: var(--head);
   }
-  .step-head:hover { background: #f3f4f6; }
+  .step-head:hover { background: var(--hover); }
   .step-head .left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .step-kind { font-weight: 700; font-size: 14px; }
   .step-date-label { font-size: 12px; color: var(--sub); }
@@ -201,7 +239,7 @@
 
   .q-item {
     border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px;
-    background: #fff;
+    background: var(--card);
   }
   .q-item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .q-num { font-size: 12px; font-weight: 700; color: var(--accent); white-space: nowrap; }
@@ -235,7 +273,7 @@
   .cal-nav { display: flex; gap: 6px; }
   .cal-nav button {
     width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line);
-    background: #fff; cursor: pointer; font-size: 14px; color: var(--text);
+    background: var(--card2); cursor: pointer; font-size: 14px; color: var(--text);
   }
   .cal-nav button:hover { background: var(--bg); }
   .cal-nav .today-btn { width: auto; padding: 0 12px; font-size: 12.5px; }
@@ -248,7 +286,7 @@
     cursor: pointer; border: 1px solid transparent; position: relative;
   }
   .cal-cell:hover { background: var(--bg); }
-  .cal-cell.other-month { color: #c4c8cf; }
+  .cal-cell.other-month { color: var(--muted-day); }
   .cal-cell.today .day-num {
     background: var(--accent); color: #fff; border-radius: 50%;
     width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
@@ -283,6 +321,7 @@
     <div class="logo">就活<span>キロク</span></div>
     <div class="header-right">
       <span class="save-status" id="saveStatus">✓ 保存済み</span>
+      <button class="gear-btn" id="themeBtn" title="ダークモード切替">🌙</button>
       <button class="gear-btn" id="openBackupBtn" title="バックアップ">⚙</button>
       <button class="add-btn" id="openAddBtn" title="新規追加">＋</button>
     </div>
@@ -290,6 +329,11 @@
 </header>
 
 <div class="container">
+
+  <!-- 検索 -->
+  <div class="search-wrap">
+    <input type="text" id="searchInput" placeholder="🔍 会社名・種類で検索">
+  </div>
 
   <!-- 進行中 -->
   <div class="section">
@@ -485,9 +529,22 @@ function locLabel(e) {
   return e.locType === 'online' ? '🔗 オンライン' : '📍 対面';
 }
 
+function urgencyLabel(e) {
+  if (e.status === 'done') return '';
+  const next = nextDateOf(e);
+  if (!next) return '';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((new Date(next + 'T00:00:00') - today) / 86400000);
+  if (diff > 3) return '';
+  return diff <= 0 ? '⏰ 今日' : diff === 1 ? '⏰ 明日' : `⏰ あと${diff}日`;
+}
+
+let searchQuery = '';
 function renderHome() {
+  const q = searchQuery.toLowerCase();
+  const visible = q ? state.entries.filter(e => (e.name + ' ' + e.type).toLowerCase().includes(q)) : state.entries;
   const groups = { ongoing: [], upcoming: [], done: [] };
-  state.entries.forEach(e => (groups[e.status] || groups.ongoing).push(e));
+  visible.forEach(e => (groups[e.status] || groups.ongoing).push(e));
 
   // 直近の予定が近い順に並べる（日程なしは後ろ）。振り返りは新しい日付順
   const byNext = (a, b) => {
@@ -503,7 +560,7 @@ function renderHome() {
     document.getElementById(countId).textContent = arr.length;
     const list = document.getElementById(listId);
     if (!arr.length) {
-      list.innerHTML = `<div class="empty-hint">${emptyMsg}</div>`;
+      list.innerHTML = `<div class="empty-hint">${q ? '該当する記録がありません' : emptyMsg}</div>`;
       return;
     }
     list.innerHTML = arr.map(e => {
@@ -512,7 +569,8 @@ function renderHome() {
       return `<div class="entry-card" onclick="openDetail('${e.id}')">
         <div class="top">
           <span class="entry-name">${esc(e.name)}</span>
-          <span style="display:flex; gap:6px; align-items:center">
+          <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end">
+            ${urgencyLabel(e) ? `<span class="urgent-badge">${urgencyLabel(e)}</span>` : ''}
             ${(e.marks || []).map(m => `<span class="result-badge">✓ ${esc(m)}</span>`).join('')}
             <span class="type-badge">${esc(e.type)}</span>
           </span>
@@ -738,6 +796,7 @@ function renderStep(e, s) {
         <textarea class="q-question" data-sid="${s.id}" data-qid="${q.id}" data-field="q" placeholder="${qLabel}内容を入力…">${esc(q.q)}</textarea>
         <span class="mini-label">${s.kind === 'ES' ? '回答・メモ' : '自分の回答・メモ'}</span>
         <textarea data-sid="${s.id}" data-qid="${q.id}" data-field="a" placeholder="回答やメモを入力…">${esc(q.a)}</textarea>
+        <div class="char-count">${(q.a || '').length}文字</div>
       </div>`).join('');
     inner += `<button class="add-mini-btn" onclick="addQuestion('${s.id}')">＋ ${qLabel}を追加</button>`;
   }
@@ -783,6 +842,9 @@ function bindStepInputs() {
       if (el.dataset.qid) {
         const q = (s.questions || []).find(x => x.id === el.dataset.qid); if (!q) return;
         q[f] = el.value;
+        if (f === 'a' && el.nextElementSibling && el.nextElementSibling.classList.contains('char-count')) {
+          el.nextElementSibling.textContent = `${el.value.length}文字`;
+        }
         if (f === 'tag') {
           el.classList.toggle('tag-honban', el.value === '本番');
           el.classList.toggle('tag-yosoku', el.value !== '本番');
@@ -1006,6 +1068,27 @@ document.getElementById('importFile').addEventListener('change', ev => {
   };
   reader.readAsText(file);
 });
+
+/* ===== 検索 ===== */
+document.getElementById('searchInput').addEventListener('input', ev => {
+  searchQuery = ev.target.value.trim();
+  renderHome();
+});
+
+/* ===== ダークモード ===== */
+const THEME_KEY = 'syuukatsu-theme';
+function applyTheme(t) {
+  document.body.classList.toggle('dark', t === 'dark');
+  document.getElementById('themeBtn').textContent = t === 'dark' ? '☀' : '🌙';
+}
+let theme = localStorage.getItem(THEME_KEY)
+  || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+applyTheme(theme);
+document.getElementById('themeBtn').onclick = () => {
+  theme = theme === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+  applyTheme(theme);
+};
 
 renderHome();
 </script>
