@@ -18,6 +18,8 @@
     --green-soft: #ecfdf5;
     --orange: #d97706;
     --orange-soft: #fffbeb;
+    --purple: #7c3aed;
+    --purple-soft: #f3e8ff;
     --card2: #ffffff;
     --head: #fafafa;
     --hover: #f3f4f6;
@@ -42,6 +44,8 @@
     --green-soft: #122e25;
     --orange: #fbbf24;
     --orange-soft: #2e2510;
+    --purple: #b794f6;
+    --purple-soft: #2a2045;
     --head: #21262e;
     --hover: #2a313a;
     --header-bg: rgba(18,21,26,.92);
@@ -126,6 +130,18 @@
     font-size: 11px; padding: 2px 10px; border-radius: 999px;
     background: var(--accent-soft); color: var(--accent); white-space: nowrap; font-weight: 600;
   }
+  .type-badge.t-green { background: var(--green-soft); color: var(--green); }
+  .type-badge.t-red { background: var(--danger-soft); color: var(--danger); }
+  .type-badge.t-purple { background: var(--purple-soft); color: var(--purple); }
+  .type-badge.t-gray { background: var(--hover); color: var(--sub); }
+  .chip-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 5px; vertical-align: 1px; background: var(--accent);
+  }
+  .chip-dot.t-green { background: var(--green); }
+  .chip-dot.t-red { background: var(--danger); }
+  .chip-dot.t-purple { background: var(--purple); }
+  .chip-dot.t-gray { background: var(--sub); }
   .entry-meta { font-size: 12px; color: var(--sub); margin-top: 6px; display: flex; gap: 12px; flex-wrap: wrap; }
   .empty-hint {
     color: var(--sub); font-size: 13px; text-align: center;
@@ -329,6 +345,10 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;
   }
   .cal-ev.entry { background: var(--accent); color: #fff; }
+  .cal-ev.entry.t-green { background: var(--green); }
+  .cal-ev.entry.t-red { background: #dc2626; }
+  .cal-ev.entry.t-purple { background: var(--purple); }
+  .cal-ev.entry.t-gray { background: var(--sub); }
   .cal-ev.range-mid { border-radius: 0; opacity: .85; }
   .cal-ev.more { background: none; color: var(--sub); }
   .day-events { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
@@ -540,6 +560,16 @@ function save() {
 }
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+/* 種類ごとの色分け */
+function typeClass(t) {
+  t = t || '';
+  if (/OB|OG/i.test(t)) return 't-red';
+  if (/インターン|ワークショップ/.test(t)) return 't-blue';
+  if (/説明会|セミナー|オープンカンパニー/.test(t)) return 't-green';
+  if (/本選考/.test(t)) return 't-purple';
+  return 't-gray';
+}
 const esc = s => (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ============ ホーム描画 ============ */
@@ -609,7 +639,7 @@ function renderHome() {
           <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end">
             ${urgencyLabel(e) ? `<span class="urgent-badge">${urgencyLabel(e)}</span>` : ''}
             ${(e.marks || []).map(m => `<span class="result-badge">✓ ${esc(m)}</span>`).join('')}
-            <span class="type-badge">${esc(e.type)}</span>
+            <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
           </span>
         </div>
         <div class="entry-meta">
@@ -707,7 +737,7 @@ function renderTypeOptions() {
   const wrap = document.getElementById('typeOptions');
   const types = [...DEFAULT_TYPES, ...state.customTypes];
   wrap.innerHTML = types.map(t =>
-    `<button class="type-chip ${selectedType === t ? 'selected' : ''}" data-type="${esc(t)}">${esc(t)}</button>`
+    `<button class="type-chip ${selectedType === t ? 'selected' : ''}" data-type="${esc(t)}"><span class="chip-dot ${typeClass(t)}"></span>${esc(t)}</button>`
   ).join('') + `<button class="type-chip ${selectedType === '__custom__' ? 'selected' : ''}" data-type="__custom__">＋ 自分で追加</button>`;
   wrap.querySelectorAll('.type-chip').forEach(btn => {
     btn.onclick = () => {
@@ -829,7 +859,7 @@ function renderDetail() {
     <div class="detail-head">
       <div>
         <div class="detail-title">${esc(e.name)}</div>
-        <span class="type-badge">${esc(e.type)}</span>
+        <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
       </div>
       <button class="close-x" onclick="closeDetail()">✕</button>
     </div>
@@ -1116,7 +1146,7 @@ function renderCalendar() {
     const shown = dayEvs.slice(0, 2);
     html += `<div class="cal-cell ${other ? 'other-month' : ''} ${ds === todayStr ? 'today' : ''} ${ds === selectedDay ? 'selected' : ''}" data-date="${ds}">
       <span class="day-num">${d.getDate()}</span>
-      ${shown.map(ev => `<div class="cal-ev ${ev.isEntry ? 'entry' : ''} ${ev.rangePos === 'mid' ? 'range-mid' : ''}">${ev.rangePos === 'mid' || ev.rangePos === 'end' ? '┈ ' : ''}${esc(ev.name)}</div>`).join('')}
+      ${shown.map(ev => `<div class="cal-ev ${ev.isEntry ? 'entry ' + typeClass(ev.kind) : ''} ${ev.rangePos === 'mid' ? 'range-mid' : ''}">${ev.rangePos === 'mid' || ev.rangePos === 'end' ? '┈ ' : ''}${esc(ev.name)}</div>`).join('')}
       ${dayEvs.length > 2 ? `<div class="cal-ev more">他${dayEvs.length - 2}件</div>` : ''}
     </div>`;
   }
