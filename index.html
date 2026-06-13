@@ -616,6 +616,7 @@ function renderHome() {
           ${entryDateLabel(e) ? `<span>📅 ${entryDateLabel(e)}</span>` : ''}
           ${locLabel(e) ? `<span>${locLabel(e)}</span>` : ''}
           <span>📋 ステップ ${doneSteps}/${e.steps.length}件</span>
+          ${e.hasFeedback ? '<span>💬 FBあり</span>' : ''}
           ${next ? `<span>⏰ 次回 ${next.replace(/-/g, '/')}</span>` : ''}
         </div>
       </div>`;
@@ -723,9 +724,10 @@ document.getElementById('openAddBtn').onclick = () => {
   document.getElementById('customTypeInput').value = '';
   document.getElementById('addStatus').value = 'ongoing';
   document.getElementById('customTypeField').style.display = 'none';
-  document.getElementById('addStartDate').value = '';
+  const todayStr = new Date().toISOString().slice(0, 10);
+  document.getElementById('addStartDate').value = todayStr;
   document.getElementById('addTime').value = '';
-  document.getElementById('addEndDate').value = '';
+  document.getElementById('addEndDate').value = todayStr;
   document.getElementById('addEndTime').value = '';
   document.getElementById('addLocValue').value = '';
   selectedLoc = '';
@@ -778,6 +780,9 @@ document.getElementById('addSave').onclick = () => {
     locType: selectedLoc,
     locValue: selectedLoc ? document.getElementById('addLocValue').value.trim() : '',
     marks: [],
+    review: '',
+    hasFeedback: false,
+    feedback: '',
     createdAt: new Date().toISOString(),
     steps: [],
   };
@@ -868,6 +873,18 @@ function renderDetail() {
     </div>
     <div id="stepsArea">${stepsHtml || '<div class="empty-hint">下のボタンから選考ステップを追加しましょう</div>'}</div>
     <div class="add-step-row">${addBtns}</div>
+    <div style="margin-top:22px">
+      <span class="mini-label">📝 振り返り</span>
+      <textarea data-efield="review" placeholder="全体の感想・学び・反省点など…">${esc(e.review)}</textarea>
+    </div>
+    <div style="margin-top:14px">
+      <span class="mini-label">💬 フィードバック</span>
+      <div class="type-options" style="margin-bottom:8px">
+        <button class="type-chip ${!e.hasFeedback ? 'selected' : ''}" onclick="setFeedback(false)">なし</button>
+        <button class="type-chip ${e.hasFeedback ? 'selected' : ''}" onclick="setFeedback(true)">あり</button>
+      </div>
+      ${e.hasFeedback ? `<textarea data-efield="feedback" placeholder="もらったフィードバックを記録…">${esc(e.feedback)}</textarea>` : ''}
+    </div>
     <div class="detail-footer">
       <button class="btn btn-danger-ghost" onclick="deleteEntry()">削除</button>
       <button class="btn btn-primary" onclick="closeDetail()">閉じる</button>
@@ -971,6 +988,11 @@ function bindStepInputs() {
 }
 
 window.setStatus = val => { const e = getEntry(); if (e) { e.status = val; save(true); renderDetail(); } };
+window.setFeedback = on => {
+  const e = getEntry(); if (!e) return;
+  e.hasFeedback = on;
+  save(); renderDetail();
+};
 window.setLocType = val => {
   const e = getEntry(); if (!e) return;
   if (e.locType !== val) e.locValue = '';
@@ -998,7 +1020,7 @@ window.toggleStep = sid => {
 };
 window.addStep = kind => {
   const e = getEntry(); if (!e) return;
-  const s = { id: uid(), kind, date: '', time: '', note: '', questions: [] };
+  const s = { id: uid(), kind, date: new Date().toISOString().slice(0, 10), time: '', note: '', questions: [] };
   e.steps.push(s);
   openSteps.add(s.id);
   save(true);
