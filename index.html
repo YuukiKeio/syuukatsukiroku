@@ -197,6 +197,20 @@
   .step-card.done .step-kind { color: var(--sub); }
   .step-card.done .step-head { background: var(--green-soft); }
   .loc-link { font-size: 12px; color: var(--accent); margin-top: 4px; display: inline-block; word-break: break-all; }
+  .multi-badge {
+    font-size: 11px; padding: 2px 10px; border-radius: 999px;
+    background: var(--hover); color: var(--text); font-weight: 700; white-space: nowrap;
+  }
+  .company-row {
+    display: flex; align-items: center; gap: 8px; padding: 12px;
+    border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px;
+    cursor: pointer; flex-wrap: wrap;
+  }
+  .company-row:hover { border-color: var(--accent); }
+  .status-mini { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 700; white-space: nowrap; }
+  .status-mini.s-ongoing { background: var(--accent-soft); color: var(--accent); }
+  .status-mini.s-upcoming { background: var(--orange-soft); color: var(--orange); }
+  .status-mini.s-done { background: var(--green-soft); color: var(--green); }
   .search-wrap { margin-top: 20px; }
   .search-wrap input {
     border-radius: 999px; padding: 10px 18px; box-shadow: var(--shadow); border-color: transparent;
@@ -522,7 +536,7 @@
 
 /* ============ データ ============ */
 const STORAGE_KEY = 'syuukatsu-kiroku-v1';
-const DEFAULT_TYPES = ['セミナー', 'ワークショップ', '説明会', 'オープンカンパニー', '本選考', 'インターン', '夏インターン', '冬インターン', 'OB・OG訪問'];
+const DEFAULT_TYPES = ['セミナー', 'ワークショップ', '説明会', 'オープンカンパニー', '本選考', 'インターン', '夏インターン', '冬インターン', 'OB・OG訪問', 'イベント'];
 const MARKS = ['ES通過', '参加決定'];
 const STEP_KINDS = {
   'ES':                     { questions: true,  qTags: false, note: false },
@@ -565,7 +579,7 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 function typeClass(t) {
   t = t || '';
   if (/OB|OG/i.test(t)) return 't-red';
-  if (/インターン|ワークショップ/.test(t)) return 't-blue';
+  if (/インターン|ワークショップ|イベント/.test(t)) return 't-blue';
   if (/説明会|セミナー|オープンカンパニー/.test(t)) return 't-green';
   if (/本選考/.test(t)) return 't-purple';
   return 't-gray';
@@ -606,6 +620,55 @@ function urgencyLabel(e) {
   return diff <= 0 ? '⏰ 今日' : diff === 1 ? '⏰ 明日' : `⏰ あと${diff}日`;
 }
 
+function singleCardHTML(e) {
+  const next = nextDateOf(e);
+  const doneSteps = e.steps.filter(s => s.done).length;
+  return `<div class="entry-card" onclick="openDetail('${e.id}')">
+    <div class="top">
+      <span class="entry-name">${esc(e.name)}</span>
+      <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end">
+        ${urgencyLabel(e) ? `<span class="urgent-badge">${urgencyLabel(e)}</span>` : ''}
+        ${(e.marks || []).map(m => `<span class="result-badge">✓ ${esc(m)}</span>`).join('')}
+        <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
+      </span>
+    </div>
+    <div class="entry-meta">
+      ${entryDateLabel(e) ? `<span>📅 ${entryDateLabel(e)}</span>` : ''}
+      ${locLabel(e) ? `<span>${locLabel(e)}</span>` : ''}
+      <span>📋 ステップ ${doneSteps}/${e.steps.length}件</span>
+      ${e.hasFeedback ? '<span>💬 FBあり</span>' : ''}
+      ${next ? `<span>⏰ 次回 ${next.replace(/-/g, '/')}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+function mergedCardHTML(name, es) {
+  const withNext = es.map(e => ({ u: urgencyLabel(e), d: nextDateOf(e) })).filter(x => x.d).sort((a, b) => a.d.localeCompare(b.d));
+  const next = withNext[0] ? withNext[0].d : null;
+  const urgent = withNext.find(x => x.u);
+  const marks = [...new Set(es.flatMap(e => e.marks || []))];
+  const total = es.reduce((n, e) => n + e.steps.length, 0);
+  const done = es.reduce((n, e) => n + e.steps.filter(s => s.done).length, 0);
+  const key = encodeURIComponent(name).replace(/'/g, '%27');
+  return `<div class="entry-card" onclick="openCompany('${key}')">
+    <div class="top">
+      <span class="entry-name">${esc(name)}</span>
+      <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end">
+        ${urgent ? `<span class="urgent-badge">${urgent.u}</span>` : ''}
+        ${marks.map(m => `<span class="result-badge">✓ ${esc(m)}</span>`).join('')}
+        <span class="multi-badge">📁 ${es.length}件</span>
+      </span>
+    </div>
+    <div class="entry-meta" style="margin-top:8px">
+      ${es.map(e => `<span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>`).join('')}
+    </div>
+    <div class="entry-meta">
+      <span>📋 ステップ ${done}/${total}件</span>
+      ${next ? `<span>⏰ 次回 ${next.replace(/-/g, '/')}</span>` : ''}
+    </div>
+  </div>`;
+}
+
 let searchQuery = '';
 function renderHome() {
   const q = searchQuery.toLowerCase();
@@ -630,27 +693,15 @@ function renderHome() {
       list.innerHTML = `<div class="empty-hint">${q ? '該当する記録がありません' : emptyMsg}</div>`;
       return;
     }
-    list.innerHTML = arr.map(e => {
-      const next = nextDateOf(e);
-      const doneSteps = e.steps.filter(s => s.done).length;
-      return `<div class="entry-card" onclick="openDetail('${e.id}')">
-        <div class="top">
-          <span class="entry-name">${esc(e.name)}</span>
-          <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end">
-            ${urgencyLabel(e) ? `<span class="urgent-badge">${urgencyLabel(e)}</span>` : ''}
-            ${(e.marks || []).map(m => `<span class="result-badge">✓ ${esc(m)}</span>`).join('')}
-            <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
-          </span>
-        </div>
-        <div class="entry-meta">
-          ${entryDateLabel(e) ? `<span>📅 ${entryDateLabel(e)}</span>` : ''}
-          ${locLabel(e) ? `<span>${locLabel(e)}</span>` : ''}
-          <span>📋 ステップ ${doneSteps}/${e.steps.length}件</span>
-          ${e.hasFeedback ? '<span>💬 FBあり</span>' : ''}
-          ${next ? `<span>⏰ 次回 ${next.replace(/-/g, '/')}</span>` : ''}
-        </div>
-      </div>`;
-    }).join('');
+    // 同名の企業は1枚のカードにまとめる
+    const byName = new Map();
+    arr.forEach(e => {
+      const k = e.name.trim();
+      if (!byName.has(k)) byName.set(k, []);
+      byName.get(k).push(e);
+    });
+    list.innerHTML = [...byName.entries()].map(([name, es]) =>
+      es.length === 1 ? singleCardHTML(es[0]) : mergedCardHTML(name, es)).join('');
   };
 
   render('listOngoing', 'countOngoing', groups.ongoing, 'まだありません。右上の＋から追加しましょう');
@@ -836,9 +887,63 @@ function openDetail(id) {
   document.getElementById('detailOverlay').classList.add('open');
 }
 function closeDetail() {
-  document.getElementById('detailOverlay').classList.remove('open');
   currentId = null;
+  if (companyFrom && state.entries.some(e => e.name.trim() === companyFrom)) {
+    renderCompany(companyFrom);
+    renderHome();
+    return;
+  }
+  companyFrom = null;
+  document.getElementById('detailOverlay').classList.remove('open');
   renderHome();
+}
+
+/* ===== 企業ページ（同名エントリーのまとめ） ===== */
+let companyFrom = null;
+const STATUS_LABEL = { ongoing: '進行中', upcoming: '予定', done: '振り返り' };
+
+window.openCompany = key => {
+  const name = decodeURIComponent(key);
+  companyFrom = name;
+  renderCompany(name);
+  document.getElementById('detailOverlay').classList.add('open');
+};
+window.closeCompany = () => {
+  companyFrom = null;
+  document.getElementById('detailOverlay').classList.remove('open');
+  renderHome();
+};
+
+function renderCompany(name) {
+  const list = state.entries.filter(e => e.name.trim() === name);
+  const order = { ongoing: 0, upcoming: 1, done: 2 };
+  list.sort((a, b) => order[a.status] - order[b.status] || (a.startDate || '9').localeCompare(b.startDate || '9'));
+  const m = document.getElementById('detailModal');
+  m.innerHTML = `
+    <div class="detail-head">
+      <div>
+        <div class="detail-title">${esc(name)}</div>
+        <span class="mini-label">${list.length}件の記録</span>
+      </div>
+      <button class="close-x" onclick="closeCompany()">✕</button>
+    </div>
+    <div style="margin-top:14px">
+      ${list.map(e => {
+        const done = e.steps.filter(s => s.done).length;
+        return `<div class="company-row" onclick="openDetail('${e.id}')">
+          <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
+          <span class="status-mini s-${e.status}">${STATUS_LABEL[e.status]}</span>
+          ${entryDateLabel(e) ? `<span style="font-size:12px;color:var(--sub)">📅 ${entryDateLabel(e)}</span>` : ''}
+          <span style="margin-left:auto; display:flex; gap:6px; align-items:center">
+            ${(e.marks || []).map(mk => `<span class="result-badge">✓ ${esc(mk)}</span>`).join('')}
+            <span style="font-size:12px;color:var(--sub)">📋 ${done}/${e.steps.length}</span>
+          </span>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="detail-footer" style="justify-content:flex-end">
+      <button class="btn btn-primary" onclick="closeCompany()">閉じる</button>
+    </div>`;
 }
 
 function renderDetail() {
