@@ -197,6 +197,17 @@
   .step-card.done .step-kind { color: var(--sub); }
   .step-card.done .step-head { background: var(--green-soft); }
   .loc-link { font-size: 12px; color: var(--accent); margin-top: 4px; display: inline-block; word-break: break-all; }
+  .suggest-box {
+    position: absolute; left: 0; right: 0; top: 100%; z-index: 20;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 10px 24px rgba(0,0,0,.15); overflow: hidden; margin-top: 4px;
+  }
+  .suggest-item {
+    padding: 10px 14px; font-size: 13.5px; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .suggest-item:hover { background: var(--hover); }
+  .suggest-item .cnt { font-size: 11px; color: var(--sub); white-space: nowrap; }
   .multi-badge {
     font-size: 11px; padding: 2px 10px; border-radius: 999px;
     background: var(--hover); color: var(--text); font-weight: 700; white-space: nowrap;
@@ -455,9 +466,10 @@
 <div class="overlay" id="addOverlay">
   <div class="modal">
     <h2>新規追加</h2>
-    <div class="field">
+    <div class="field" style="position:relative">
       <label>会社名・タイトル</label>
-      <input type="text" id="addName" placeholder="例：〇〇株式会社">
+      <input type="text" id="addName" placeholder="例：〇〇株式会社" autocomplete="off">
+      <div class="suggest-box" id="nameSuggest" style="display:none"></div>
     </div>
     <div class="field">
       <label>種類</label>
@@ -814,9 +826,35 @@ document.getElementById('openAddBtn').onclick = () => {
   selectedLoc = '';
   updateLocUI();
   renderTypeOptions();
+  document.getElementById('nameSuggest').style.display = 'none';
   document.getElementById('addOverlay').classList.add('open');
   document.getElementById('addName').focus();
 };
+
+/* 会社名のサジェスト（2文字目から、既存の名前を候補表示） */
+const nameInputEl = document.getElementById('addName');
+const suggestBoxEl = document.getElementById('nameSuggest');
+nameInputEl.addEventListener('input', () => {
+  const v = nameInputEl.value.trim();
+  if (v.length < 2) { suggestBoxEl.style.display = 'none'; return; }
+  const names = [...new Set(state.entries.map(e => e.name.trim()))]
+    .filter(n => n !== v && n.toLowerCase().includes(v.toLowerCase()))
+    .slice(0, 5);
+  if (!names.length) { suggestBoxEl.style.display = 'none'; return; }
+  suggestBoxEl.innerHTML = names.map(n => {
+    const cnt = state.entries.filter(e => e.name.trim() === n).length;
+    return `<div class="suggest-item" data-name="${esc(n)}"><span>${esc(n)}</span><span class="cnt">${cnt}件の記録あり</span></div>`;
+  }).join('');
+  suggestBoxEl.style.display = '';
+  suggestBoxEl.querySelectorAll('.suggest-item').forEach(it => {
+    it.addEventListener('mousedown', ev => {
+      ev.preventDefault();
+      nameInputEl.value = it.dataset.name;
+      suggestBoxEl.style.display = 'none';
+    });
+  });
+});
+nameInputEl.addEventListener('blur', () => setTimeout(() => { suggestBoxEl.style.display = 'none'; }, 150));
 
 /* 開始日を入れたら終了日の初期値も合わせる（Appleカレンダー風） */
 document.getElementById('addStartDate').addEventListener('change', ev => {
@@ -876,12 +914,14 @@ document.getElementById('addSave').onclick = () => {
 
 /* ============ 詳細 ============ */
 let currentId = null;
+let metaEditOpen = false;
 const openSteps = new Set();
 
 function getEntry() { return state.entries.find(e => e.id === currentId); }
 
 function openDetail(id) {
   currentId = id;
+  metaEditOpen = false;
   openSteps.clear();
   renderDetail();
   document.getElementById('detailOverlay').classList.add('open');
@@ -965,9 +1005,24 @@ function renderDetail() {
       <div>
         <div class="detail-title">${esc(e.name)}</div>
         <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
+        <button class="q-del" style="font-size:13px" onclick="toggleMetaEdit()" title="名前・種類を編集">✏️ 編集</button>
       </div>
       <button class="close-x" onclick="closeDetail()">✕</button>
     </div>
+    ${metaEditOpen ? `
+    <div style="margin:14px 0; padding:14px; border:1px dashed var(--line); border-radius:10px">
+      <span class="mini-label">名前を変更</span>
+      <input type="text" id="editEntryName" value="${esc(e.name)}" style="margin-bottom:12px">
+      <span class="mini-label">種類を変更</span>
+      <div class="type-options">
+        ${[...DEFAULT_TYPES, ...state.customTypes].map(t =>
+          `<button class="type-chip ${e.type === t ? 'selected' : ''}" onclick="setEntryType('${encodeURIComponent(t).replace(/'/g, '%27')}')"><span class="chip-dot ${typeClass(t)}"></span>${esc(t)}</button>`).join('')}
+      </div>
+      <div style="display:flex; gap:8px; margin-top:10px">
+        <input type="text" id="editCustomType" placeholder="新しい種類名を入力">
+        <button class="btn btn-outline" style="white-space:nowrap" onclick="addCustomTypeFromDetail()">追加</button>
+      </div>
+    </div>` : ''}
     <div class="status-tabs">
       ${statusBtn('ongoing', '進行中', 'ongoing')}
       ${statusBtn('upcoming', '予定', 'upcoming')}
@@ -1085,6 +1140,16 @@ function renderStep(e, s) {
 }
 
 function bindStepInputs() {
+  const nameEl = document.getElementById('editEntryName');
+  if (nameEl) {
+    nameEl.addEventListener('input', () => {
+      const e = getEntry(); if (!e) return;
+      e.name = nameEl.value;
+      const title = document.querySelector('#detailModal .detail-title');
+      if (title) title.textContent = nameEl.value;
+      save();
+    });
+  }
   document.querySelectorAll('#detailModal [data-efield]').forEach(el => {
     el.addEventListener('input', () => {
       const e = getEntry(); if (!e) return;
@@ -1123,6 +1188,20 @@ function bindStepInputs() {
 }
 
 window.setStatus = val => { const e = getEntry(); if (e) { e.status = val; save(true); renderDetail(); } };
+window.toggleMetaEdit = () => { metaEditOpen = !metaEditOpen; renderDetail(); };
+window.setEntryType = k => {
+  const e = getEntry(); if (!e) return;
+  e.type = decodeURIComponent(k);
+  save(); renderDetail();
+};
+window.addCustomTypeFromDetail = () => {
+  const v = document.getElementById('editCustomType').value.trim();
+  if (!v) return;
+  if (!DEFAULT_TYPES.includes(v) && !state.customTypes.includes(v)) state.customTypes.push(v);
+  const e = getEntry(); if (!e) return;
+  e.type = v;
+  save(); renderDetail();
+};
 window.setFeedback = on => {
   const e = getEntry(); if (!e) return;
   e.hasFeedback = on;
