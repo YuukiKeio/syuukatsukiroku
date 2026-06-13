@@ -569,9 +569,14 @@ let state = load();
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (!s.customTypes) s.customTypes = [];
+      if (!s.companies) s.companies = {};
+      return s;
+    }
   } catch (e) {}
-  return { entries: [], customTypes: [] };
+  return { entries: [], customTypes: [], companies: {} };
 }
 
 /* 即時保存：遅延なしでlocalStorageへ書き込む（モバイルで閉じてもデータが残る） */
@@ -591,6 +596,103 @@ function save() {
 }
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+/* ===== iOSカレンダー（.ics）書き出し ===== */
+function icsEscape(s) {
+  return (s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+}
+function nextDayStr(ds) {
+  const d = new Date(ds + 'T00:00:00');
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+}
+function addOneHour(t) {
+  const [h, m] = t.split(':').map(Number);
+  return `${String((h + 1) % 24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+function buildVEvent({ uid, date, endDate, time, endTime, summary, location, description }) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+  const lines = ['BEGIN:VEVENT', 'UID:' + uid + '@syukatsukiroku', 'DTSTAMP:' + stamp];
+  const multiDay = endDate && endDate > date;
+  if (time && !multiDay) {
+    const d = date.replace(/-/g, '');
+    const et = endTime || addOneHour(time);
+    lines.push('DTSTART:' + d + 'T' + time.replace(':', '') + '00');
+    lines.push('DTEND:' + d + 'T' + et.replace(':', '') + '00');
+  } else {
+    lines.push('DTSTART;VALUE=DATE:' + date.replace(/-/g, ''));
+    lines.push('DTEND;VALUE=DATE:' + nextDayStr(multiDay ? endDate : date));
+  }
+  lines.push('SUMMARY:' + icsEscape(summary));
+  if (location) lines.push('LOCATION:' + icsEscape(location));
+  if (description) lines.push('DESCRIPTION:' + icsEscape(description));
+  lines.push('END:VEVENT');
+  return lines;
+}
+function entryToICS(e) {
+  let events = [];
+  const label = e.type + (e.subtitle ? '・' + e.subtitle : '');
+  if (e.startDate) {
+    events = events.concat(buildVEvent({
+      uid: e.id, date: e.startDate, endDate: e.endDate, time: e.time, endTime: e.endTime,
+      summary: `${e.name}（${label}）`,
+      location: e.locType === 'online' ? 'オンライン' : (e.locValue || ''),
+      description: (e.locType === 'online' && e.locValue ? 'URL: ' + e.locValue : '') + (e.review ? '\n' + e.review : ''),
+    }));
+  }
+  e.steps.forEach(s => {
+    if (s.date) events = events.concat(buildVEvent({
+      uid: s.id, date: s.date, time: s.time,
+      summary: `${e.name} - ${s.kind}`, location: '', description: s.note || '',
+    }));
+  });
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//syukatsukiroku//JP', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].join('\r\n');
+}
+function downloadICS(name, content) {
+  const blob = new Blob([content], { type: 'text/calendar;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+window.exportEntryToCalendar = id => {
+  const e = state.entries.find(x => x.id === id); if (!e) return;
+  if (!e.startDate && !e.steps.some(s => s.date)) { alert('日程が登録されていません'); return; }
+  downloadICS(`${e.name}.ics`, entryToICS(e));
+};
+
+/* ===== 企業情報（マイページ・ID・パスワード） ===== */
+function companyInfoHTML(name) {
+  const c = state.companies[name] || {};
+  const url = c.mypageUrl || '';
+  return `<div style="margin-top:18px; padding:14px; border:1px solid var(--line); border-radius:10px">
+    <span class="mini-label">🔐 マイページ情報</span>
+    <div style="margin-bottom:8px">
+      <input type="text" class="cinfo" data-cfield="mypageUrl" placeholder="マイページURL" value="${esc(url)}">
+      ${/^https?:\/\//.test(url) ? `<a class="loc-link" href="${esc(url)}" target="_blank" rel="noopener">🔗 マイページを開く</a>` : ''}
+    </div>
+    <input type="text" class="cinfo" data-cfield="loginId" placeholder="ログインID・登録メール" value="${esc(c.loginId || '')}" style="margin-bottom:8px">
+    <div style="display:flex; gap:8px">
+      <input type="password" class="cinfo" id="cinfoPw" data-cfield="password" placeholder="パスワード" value="${esc(c.password || '')}">
+      <button class="btn btn-outline" style="white-space:nowrap" onclick="togglePw()">👁 表示</button>
+    </div>
+    <div style="font-size:11px; color:var(--sub); margin-top:8px">※この端末のブラウザにのみ保存されます。共用PCでは入力しないでください。</div>
+  </div>`;
+}
+function bindCompanyInfo(name) {
+  document.querySelectorAll('#detailModal .cinfo').forEach(el => {
+    el.addEventListener('input', () => {
+      state.companies[name] = state.companies[name] || {};
+      state.companies[name][el.dataset.cfield] = el.value;
+      save();
+    });
+  });
+}
+window.togglePw = () => {
+  const pw = document.getElementById('cinfoPw');
+  if (pw) pw.type = pw.type === 'password' ? 'text' : 'password';
+};
 
 /* 種類ごとの色分け */
 function typeClass(t) {
@@ -917,6 +1019,9 @@ document.getElementById('addSave').onclick = () => {
   save(true);
   document.getElementById('addOverlay').classList.remove('open');
   renderHome();
+  if (entry.startDate && confirm('iOSカレンダーに追加しますか？\n（ダウンロードした .ics ファイルを開くとカレンダーに登録できます）')) {
+    downloadICS(`${entry.name}.ics`, entryToICS(entry));
+  }
   openDetail(entry.id);
 };
 
@@ -990,9 +1095,11 @@ function renderCompany(name) {
         </div>`;
       }).join('')}
     </div>
+    ${companyInfoHTML(name)}
     <div class="detail-footer" style="justify-content:flex-end">
       <button class="btn btn-primary" onclick="closeCompany()">閉じる</button>
     </div>`;
+  bindCompanyInfo(name);
 }
 
 function renderDetail() {
@@ -1052,6 +1159,7 @@ function renderDetail() {
         <input type="date" data-efield="endDate" value="${esc(e.endDate)}">
         <input type="time" data-efield="endTime" value="${esc(e.endTime)}">
       </div>
+      <button class="btn btn-outline" style="margin-top:8px; font-size:13px" onclick="exportEntryToCalendar('${e.id}')">📅 iOSカレンダーに登録</button>
     </div>
     <div style="margin-bottom:14px">
       <span class="mini-label">場所</span>
@@ -1087,12 +1195,14 @@ function renderDetail() {
       </div>
       ${e.hasFeedback ? `<textarea data-efield="feedback" placeholder="もらったフィードバックを記録…">${esc(e.feedback)}</textarea>` : ''}
     </div>
+    ${companyInfoHTML(e.name.trim())}
     <div class="detail-footer">
       <button class="btn btn-danger-ghost" onclick="deleteEntry()">削除</button>
       <button class="btn btn-primary" onclick="closeDetail()">閉じる</button>
     </div>`;
 
   bindStepInputs();
+  bindCompanyInfo(e.name.trim());
 }
 
 function renderStep(e, s) {
@@ -1413,7 +1523,7 @@ document.getElementById('importFile').addEventListener('change', ev => {
       const data = JSON.parse(reader.result);
       if (!data || !Array.isArray(data.entries)) throw new Error('invalid');
       if (!confirm(`バックアップから ${data.entries.length} 件の記録を読み込みます。\n現在のデータは上書きされます。よろしいですか？`)) return;
-      state = { entries: data.entries, customTypes: Array.isArray(data.customTypes) ? data.customTypes : [] };
+      state = { entries: data.entries, customTypes: Array.isArray(data.customTypes) ? data.customTypes : [], companies: (data.companies && typeof data.companies === 'object') ? data.companies : {} };
       save();
       renderHome();
       document.getElementById('backupOverlay').classList.remove('open');
