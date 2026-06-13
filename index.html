@@ -143,6 +143,7 @@
   .chip-dot.t-purple { background: var(--purple); }
   .chip-dot.t-gray { background: var(--sub); }
   .entry-meta { font-size: 12px; color: var(--sub); margin-top: 6px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .entry-sub { font-size: 12.5px; color: var(--sub); margin-top: 2px; font-weight: 600; }
   .empty-hint {
     color: var(--sub); font-size: 13px; text-align: center;
     padding: 24px; background: var(--card); border-radius: var(--radius);
@@ -472,6 +473,10 @@
       <div class="suggest-box" id="nameSuggest" style="display:none"></div>
     </div>
     <div class="field">
+      <label>活動名（任意）</label>
+      <input type="text" id="addSubtitle" placeholder="例：1day仕事体験、夏季5daysコース">
+    </div>
+    <div class="field">
       <label>種類</label>
       <div class="type-options" id="typeOptions"></div>
     </div>
@@ -644,6 +649,7 @@ function singleCardHTML(e) {
         <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
       </span>
     </div>
+    ${e.subtitle ? `<div class="entry-sub">${esc(e.subtitle)}</div>` : ''}
     <div class="entry-meta">
       ${entryDateLabel(e) ? `<span>📅 ${entryDateLabel(e)}</span>` : ''}
       ${locLabel(e) ? `<span>${locLabel(e)}</span>` : ''}
@@ -684,7 +690,7 @@ function mergedCardHTML(name, es) {
 let searchQuery = '';
 function renderHome() {
   const q = searchQuery.toLowerCase();
-  const visible = q ? state.entries.filter(e => (e.name + ' ' + e.type).toLowerCase().includes(q)) : state.entries;
+  const visible = q ? state.entries.filter(e => (e.name + ' ' + e.type + ' ' + (e.subtitle || '')).toLowerCase().includes(q)) : state.entries;
   const groups = { ongoing: [], upcoming: [], done: [] };
   visible.forEach(e => (groups[e.status] || groups.ongoing).push(e));
 
@@ -817,6 +823,7 @@ document.getElementById('openAddBtn').onclick = () => {
   document.getElementById('customTypeInput').value = '';
   document.getElementById('addStatus').value = 'ongoing';
   document.getElementById('customTypeField').style.display = 'none';
+  document.getElementById('addSubtitle').value = '';
   const todayStr = new Date().toISOString().slice(0, 10);
   document.getElementById('addStartDate').value = todayStr;
   document.getElementById('addTime').value = '';
@@ -892,6 +899,7 @@ document.getElementById('addSave').onclick = () => {
   if (endDate === startDate) endDate = '';
   const entry = {
     id: uid(), name, type,
+    subtitle: document.getElementById('addSubtitle').value.trim(),
     status: document.getElementById('addStatus').value,
     startDate, endDate,
     time: startDate ? document.getElementById('addTime').value : '',
@@ -973,6 +981,7 @@ function renderCompany(name) {
         return `<div class="company-row" onclick="openDetail('${e.id}')">
           <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
           <span class="status-mini s-${e.status}">${STATUS_LABEL[e.status]}</span>
+          ${e.subtitle ? `<span style="font-size:12.5px; font-weight:600">${esc(e.subtitle)}</span>` : ''}
           ${entryDateLabel(e) ? `<span style="font-size:12px;color:var(--sub)">📅 ${entryDateLabel(e)}</span>` : ''}
           <span style="margin-left:auto; display:flex; gap:6px; align-items:center">
             ${(e.marks || []).map(mk => `<span class="result-badge">✓ ${esc(mk)}</span>`).join('')}
@@ -1004,8 +1013,9 @@ function renderDetail() {
     <div class="detail-head">
       <div>
         <div class="detail-title">${esc(e.name)}</div>
+        ${e.subtitle ? `<div class="entry-sub" style="margin-bottom:4px">${esc(e.subtitle)}</div>` : ''}
         <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
-        <button class="q-del" style="font-size:13px" onclick="toggleMetaEdit()" title="名前・種類を編集">✏️ 編集</button>
+        <button class="q-del" style="font-size:13px" onclick="toggleMetaEdit()" title="名前・活動名・種類を編集">✏️ 編集</button>
       </div>
       <button class="close-x" onclick="closeDetail()">✕</button>
     </div>
@@ -1013,6 +1023,8 @@ function renderDetail() {
     <div style="margin:14px 0; padding:14px; border:1px dashed var(--line); border-radius:10px">
       <span class="mini-label">名前を変更</span>
       <input type="text" id="editEntryName" value="${esc(e.name)}" style="margin-bottom:12px">
+      <span class="mini-label">活動名（例：1day仕事体験）</span>
+      <input type="text" data-efield="subtitle" value="${esc(e.subtitle || '')}" style="margin-bottom:12px">
       <span class="mini-label">種類を変更</span>
       <div class="type-options">
         ${[...DEFAULT_TYPES, ...state.customTypes].map(t =>
@@ -1288,7 +1300,7 @@ function allEvents() {
         const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         evs.push({
           date: ds, time: ds === e.startDate ? ((e.time || '') + (!isRange && e.time && e.endTime ? '〜' + e.endTime : '')) : '',
-          name: e.name, kind: e.type, entryId: e.id,
+          name: e.name, kind: e.type, sub: e.subtitle || '', entryId: e.id,
           isEntry: true, isRange,
           rangePos: !isRange ? '' : ds === e.startDate ? 'start' : ds === end ? 'end' : 'mid',
           rangeLabel: isRange ? `${e.startDate.slice(5).replace('-', '/')}〜${end.slice(5).replace('-', '/')}` : '',
@@ -1347,7 +1359,7 @@ function renderCalendar() {
       (dayEvs.length
         ? dayEvs.map(ev => `<div class="day-ev-item" onclick="openDetail('${ev.entryId}')">
             <span class="day-ev-time">${ev.isRange ? '期間' : (ev.time || '--:--')}</span>
-            <div><div class="day-ev-name">${esc(ev.name)}</div><div class="day-ev-kind">${esc(ev.kind)}${ev.rangeLabel ? '・' + ev.rangeLabel : ''}</div></div>
+            <div><div class="day-ev-name">${esc(ev.name)}</div><div class="day-ev-kind">${esc(ev.kind)}${ev.sub ? '・' + esc(ev.sub) : ''}${ev.rangeLabel ? '・' + ev.rangeLabel : ''}</div></div>
           </div>`).join('')
         : '<div class="no-events">この日の予定はありません</div>');
   } else {
