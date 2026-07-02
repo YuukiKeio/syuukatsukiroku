@@ -316,8 +316,33 @@ function renderHome() {
   render('listOngoing', 'countOngoing', groups.ongoing, 'まだありません。右上の＋から追加しましょう');
   render('listUpcoming', 'countUpcoming', groups.upcoming, '予定はありません');
   render('listDone', 'countDone', groups.done, 'まだありません');
+  renderBanner();
   renderStats();
   renderCalendar();
+}
+
+/* ============ 今日・明日バナー ============ */
+function renderBanner() {
+  const banner = $('todayBanner');
+  const today = todayYMD();
+  const tomorrow = ymd(new Date(Date.now() + 86400000));
+  const target = allEvents().filter(ev => ev.date === today || ev.date === tomorrow);
+  if (!target.length) { banner.innerHTML = ''; return; }
+
+  banner.innerHTML = `<div class="today-banner">
+    <h4>🔔 直近の予定</h4>
+    ${target.map(ev => {
+      const isToday = ev.date === today;
+      return `<div class="banner-item" onclick="openDetail('${ev.entryId}')">
+        <span class="banner-when ${isToday ? 'today' : 'tomorrow'}">${isToday ? '今日' : '明日'}</span>
+        <div>
+          <div class="banner-name">${esc(ev.name)}</div>
+          <div class="banner-kind">${esc(ev.kind)}${ev.sub ? '・' + esc(ev.sub) : ''}</div>
+        </div>
+        <span class="banner-time">${ev.isRange ? '期間中' : (ev.time || '')}</span>
+      </div>`;
+    }).join('')}
+  </div>`;
 }
 
 /* ============ 統計 ============ */
@@ -986,6 +1011,15 @@ function applyTheme(t) {
   $('themeBtn').textContent = t === 'dark' ? '☀' : '🌙';
 }
 
+/* ============ 統計の折りたたみ ============ */
+const STATS_KEY = 'syuukatsu-stats-collapsed';
+let statsCollapsed = localStorage.getItem(STATS_KEY) === '1';
+
+function applyStatsCollapse() {
+  $('statsToggle').classList.toggle('collapsed', statsCollapsed);
+  $('statsArea').style.display = statsCollapsed ? 'none' : '';
+}
+
 /* ============ グローバル公開（inline onclick用） ============ */
 Object.assign(window, {
   openDetail, closeDetail, openCompany, closeCompany,
@@ -1044,6 +1078,13 @@ function initEvents() {
     renderHome();
   });
 
+  /* 統計の折りたたみ */
+  $('statsToggle').onclick = () => {
+    statsCollapsed = !statsCollapsed;
+    try { localStorage.setItem(STATS_KEY, statsCollapsed ? '1' : '0'); } catch (e) {}
+    applyStatsCollapse();
+  };
+
   /* カレンダー */
   $('calPrev').onclick = () => { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendar(); };
   $('calNext').onclick = () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendar(); };
@@ -1062,4 +1103,5 @@ function initEvents() {
 
 initEvents();
 applyTheme(theme);
+applyStatsCollapse();
 renderHome();
