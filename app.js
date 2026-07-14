@@ -14,6 +14,7 @@ const COHORT = '29卒';
 const ACTIVITY_TYPES = ['インターン', '本選考', '説明会', 'セミナー', 'オープンカンパニー', 'イベント'];
 const SEASONS = ['サマー', 'オータム', 'ウィンター', '通年', '本選考'];
 const ACTIVITY_STATUS = ['未着手', '応募中', '結果待ち', '参加済み', '完了'];
+const ACTIVITY_MARKS = ['ES通過', '参加決定', '内定', 'お祈り', '辞退'];
 const STEP_PRESETS = ['ES', 'セミナー', '説明会', 'Webテスト', '適性検査', '動画選考', 'GD', '集団面接', '面接', '最終面接'];
 
 /* 種類→カード色トーン */
@@ -105,9 +106,12 @@ function normalize(s) {
 }
 
 /* 旧 v1（フラットな entries[]）→ 企業／活動／選考ステップに変換 */
-function migrateFromV1() {
+function migrateFromV1(fromBackup) {
   let old;
-  try { old = JSON.parse(localStorage.getItem(OLD_KEY)); } catch (e) { return null; }
+  try {
+    old = JSON.parse(localStorage.getItem(OLD_KEY));
+    if ((!old || !Array.isArray(old.entries) || !old.entries.length) && fromBackup) old = JSON.parse(localStorage.getItem(OLD_KEY + '-backup'));
+  } catch (e) { return null; }
   if (!old || !Array.isArray(old.entries) || !old.entries.length) return null;
 
   const ns = blankState();
@@ -385,7 +389,7 @@ function renderStats(c) {
   }).filter(f => f.total > 0);
   const passedSteps = acts.flatMap(a => a.steps).filter(s => s.status !== 'pending');
   const passRate = passedSteps.length ? Math.round(passedSteps.filter(s => s.status === 'passed').length / passedSteps.length * 100) : 0;
-  const kettei = acts.filter(a => (a.marks || []).includes('参加決定') || a.status === '参加済み').length;
+  const kettei = acts.filter(a => (a.marks || []).some(m => m === '参加決定' || m === '内定') || a.status === '参加済み').length;
   // 結果構成
   const passingCo = new Set(acts.filter(a => a.steps.some(s => s.status === 'passed') && !a.steps.some(s => s.status === 'failed')).map(a => a.companyId)).size;
   const failedCo = new Set(acts.filter(a => a.steps.some(s => s.status === 'failed')).map(a => a.companyId)).size;
@@ -604,6 +608,11 @@ function renderSettings(c) {
       <div class="workspace-title compact"><div><span class="section-kicker">APPEARANCE</span><h2>表示</h2></div></div>
       <div style="display:flex;gap:10px;margin-top:12px"><button class="primary-button" id="setTheme" style="background:var(--surface-2);color:var(--text)"><span>${theme === 'dark' ? '☀' : '☾'}</span>${theme === 'dark' ? 'ライトモード' : 'ダークモード'}にする</button></div>
     </section>
+    ${hasV1Backup() ? `<section class="workspace-panel" style="padding:22px;border-color:color-mix(in srgb,var(--amber) 30%,var(--line))">
+      <div class="workspace-title compact"><div><span class="section-kicker" style="color:var(--amber)">RE-MIGRATE</span><h2>旧データから再移行</h2></div></div>
+      <p style="color:var(--sub);font-size:11px;line-height:1.8;margin:10px 0 16px">旧バージョン(v1)のバックアップから、企業・活動・選考ステップ(ステップ時刻を含む)をもう一度移行します。<strong style="color:var(--red)">現在の新データは上書きされます。</strong>先にエクスポートしてください。</p>
+      <button class="primary-button" id="setRemigrate" style="background:var(--amber)"><span>↺</span>旧データから再移行する</button>
+    </section>` : ''}
     <section class="workspace-panel" style="padding:22px;border-color:color-mix(in srgb,var(--red) 25%,var(--line))">
       <div class="workspace-title compact"><div><span class="section-kicker" style="color:var(--red)">DANGER</span><h2>データの初期化</h2></div></div>
       <p style="color:var(--sub);font-size:11px;line-height:1.8;margin:10px 0 16px">すべての記録を削除します。取り消せません。事前にエクスポートしてください。</p>
@@ -615,6 +624,15 @@ function renderSettings(c) {
   $('setFile').addEventListener('change', ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f) importBackup(f); });
   $('setTheme').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME_KEY, theme); } catch (e) {} applyTheme(); renderSettings(c); };
   $('setReset').onclick = () => { if (!confirm('本当にすべてのデータを削除しますか？この操作は取り消せません。')) return; state = normalize(blankState()); state._migrated = true; save(); flash('データを初期化しました'); setView('home'); };
+  $('setRemigrate') && ($('setRemigrate').onclick = () => {
+    if (!confirm('旧データ(v1)から再移行します。現在の新データは上書きされます。よろしいですか？')) return;
+    const m = migrateFromV1(true);
+    if (!m) { alert('移行できる旧データが見つかりませんでした。'); return; }
+    state = normalize(m); state._migrated = true; save(); flash('旧データから再移行しました'); setView('home');
+  });
+}
+function hasV1Backup() {
+  try { return !!(localStorage.getItem(OLD_KEY) || localStorage.getItem(OLD_KEY + '-backup')); } catch (e) { return false; }
 }
 function importBackup(file) {
   const reader = new FileReader();
@@ -748,10 +766,13 @@ function researchTabHTML(co) {
         <section class="workspace-panel fact-sheet"><div class="workspace-title compact"><div><span>BASIC DATA</span><h2>基本情報</h2></div></div>
           <dl>
             <div><dt>業界</dt><dd>${esc(co.industry || '—')}</dd></div>
+            <div><dt>細分</dt><dd>${esc(co.subIndustry || '—')}</dd></div>
             <div><dt>本社</dt><dd>${esc(co.headquarters || '—')}</dd></div>
             <div><dt>創立</dt><dd>${esc(co.founded || '—')}</dd></div>
             <div><dt>従業員数</dt><dd>${esc(co.employees || '—')}</dd></div>
+            <div><dt>事業体制</dt><dd>${esc(co.businessScale || '—')}</dd></div>
           </dl></section>
+        ${co.links && co.links.length ? `<section class="workspace-panel mini-company-info"><div class="workspace-title compact"><div><span>LINKS</span><h2>企業リンク</h2></div></div>${co.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noreferrer">${esc(l.label)}<span>↗</span></a>`).join('')}</section>` : ''}
       </aside>
     </div>
   </div>`;
@@ -772,13 +793,18 @@ function renderFlow() {
   const failed = a.steps.some(s => s.status === 'failed');
   const selected = a.steps.find(s => s.id === flowStepId);
 
+  const dateLine = a.startDate ? (a.endDate ? `${fmtJDate(a.startDate)}〜${fmtJDate(a.endDate)}` : fmtJDate(a.startDate) + (a.time ? ' ' + a.time : '')) : '日程未定';
   $('overlayRoot').innerHTML = `<div class="company-workspace"><main class="company-page-main">
-    <button class="flow-back" id="flowBack"><span>‹</span>${esc(co.name)} の活動に戻る</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 11px 3px">
+      <button class="flow-back" id="flowBack"><span>‹</span>${esc(co.name)} の活動に戻る</button>
+      <button id="actEdit" style="height:32px;padding:0 13px;border-radius:9px;background:var(--primary-soft);color:var(--primary);font-size:10px;font-weight:800">⚙ 活動を編集</button>
+    </div>
     <section class="flow-event-header workspace-panel">
       <div class="flow-event-icon">${esc(a.season.slice(0, 2))}</div>
-      <div><div class="flow-event-tags"><span>${COHORT}</span><span>${esc(a.type)}</span><span>${esc(a.year)}年</span><span class="saved-tag">✓ 自動保存</span></div><h2>${esc(a.title)}</h2><p>${esc(co.name)}</p></div>
+      <div><div class="flow-event-tags"><span>${COHORT}</span><span>${esc(a.type)}</span><span>${esc(a.year)}年</span><span>${esc(a.status)}</span>${(a.marks || []).map(m => `<span class="saved-tag">✓ ${esc(m)}</span>`).join('')}</div><h2>${esc(a.title)}</h2><p>${esc(co.name)} ・ ${dateLine}</p></div>
       <div class="flow-summary"><span>進捗</span><strong>${p.passed}<small> / ${a.steps.length}</small></strong><em class="${failed ? 'failed' : 'active'}">${failed ? '選考終了' : '選考中'}</em></div>
     </section>
+    ${(a.review || a.feedback) ? `<section class="workspace-panel" style="padding:16px 20px;margin-top:13px"><div class="workspace-title compact"><div><span>REFLECTION</span><h2>振り返り・フィードバック</h2></div></div>${a.review ? `<p style="color:var(--text);font-size:11px;line-height:1.8;margin:10px 0 0">📝 ${esc(a.review)}</p>` : ''}${a.feedback ? `<p style="color:var(--sub);font-size:11px;line-height:1.8;margin:8px 0 0">💬 ${esc(a.feedback)}</p>` : ''}</section>` : ''}
 
     <section class="workspace-panel flow-map-panel">
       <div class="workspace-title"><div><span>SELECTION FLOW</span><h2>選考プロセス</h2></div><div class="flow-toolbar"><button id="flowEdit">＋ フローを編集</button><div class="flow-legend"><span><i class="passed"></i>通過</span><span><i class="failed"></i>落選</span><span><i class="pending"></i>未定</span></div></div></div>
@@ -790,6 +816,7 @@ function renderFlow() {
   </main></div>`;
 
   $('flowBack').onclick = () => { wsActivityId = null; flowStepId = null; renderWorkspace(); };
+  $('actEdit').onclick = () => openActivityEditor(a.id);
   $('flowEdit').onclick = () => openFlowEditor(a.id);
   $('overlayRoot').querySelectorAll('[data-node]').forEach(b => b.onclick = () => { flowStepId = b.dataset.node; renderFlow(); });
   if (selected) bindStepDetail(a, selected);
@@ -953,6 +980,39 @@ function openActivityAdd(cid) {
   };
 }
 
+/* ---- 活動を編集（ステータス・日程・場所・結果・振り返り） ---- */
+function openActivityEditor(aid) {
+  const a = activityById(aid); if (!a) return;
+  const w = openModal(`<div class="step-editor-modal"><div class="flow-editor-head"><div><span>ACTIVITY SETTINGS</span><h2>活動を編集</h2><p>ステータス・日程・場所・結果・振り返りを設定します。</p></div><button data-x>×</button></div>
+    <div class="step-editor-fields">
+      <label>表示名<input id="ae_title" value="${esc(a.title)}"></label>
+      <div class="step-editor-date-grid"><label>種類<select id="ae_type">${ACTIVITY_TYPES.map(t => `<option ${a.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label><label>ステータス<select id="ae_status">${ACTIVITY_STATUS.map(s => `<option ${a.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div>
+      <div class="step-editor-date-grid"><label>開催年<select id="ae_year">${['2025', '2026', '2027', '2028', '2029'].map(y => `<option ${a.year === y ? 'selected' : ''}>${y}</option>`).join('')}</select></label><label>シーズン<select id="ae_season">${SEASONS.map(s => `<option ${a.season === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div>
+      <div class="step-editor-date-grid"><label>開始日<input id="ae_start" type="date" value="${esc(a.startDate)}"></label><label>時刻<input id="ae_time" type="time" value="${esc(a.time)}"></label></div>
+      <div class="step-editor-date-grid"><label>終了日（任意）<input id="ae_end" type="date" value="${esc(a.endDate)}"></label><label>終了時刻<input id="ae_endtime" type="time" value="${esc(a.endTime)}"></label></div>
+      <label>場所<select id="ae_loctype"><option value="" ${!a.locType ? 'selected' : ''}>なし</option><option value="online" ${a.locType === 'online' ? 'selected' : ''}>オンライン</option><option value="offline" ${a.locType === 'offline' ? 'selected' : ''}>対面</option></select></label>
+      <label id="ae_locwrap" style="${a.locType ? '' : 'display:none'}">URL・住所<input id="ae_locval" value="${esc(a.locValue)}"></label>
+      <label>結果マーク<div class="type-options" id="ae_marks" style="margin-top:5px">${ACTIVITY_MARKS.map(m => `<button type="button" class="type-chip ${(a.marks || []).includes(m) ? 'selected' : ''}" data-mark="${m}">${m}</button>`).join('')}</div></label>
+      <label>振り返り<textarea id="ae_review" placeholder="全体の感想・学び・反省点">${esc(a.review)}</textarea></label>
+      <label>フィードバック<textarea id="ae_feedback" placeholder="企業・面接官からの評価">${esc(a.feedback)}</textarea></label>
+    </div>
+    <footer class="step-editor-actions" style="justify-content:space-between"><button data-del style="color:var(--red);background:var(--surface-2)">この活動を削除</button><span style="display:flex;gap:8px"><button data-x>キャンセル</button><button data-save>保存する</button></span></footer></div>`);
+  const q = s => w.querySelector(s);
+  let marks = (a.marks || []).slice();
+  q('#ae_loctype').onchange = () => { q('#ae_locwrap').style.display = q('#ae_loctype').value ? 'block' : 'none'; };
+  w.querySelectorAll('[data-mark]').forEach(b => b.onclick = () => { const m = b.dataset.mark; if (marks.includes(m)) marks = marks.filter(x => x !== m); else marks.push(m); b.classList.toggle('selected'); });
+  w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => w.remove());
+  q('[data-del]').onclick = () => { if (!confirm(`活動「${a.title}」を削除しますか？選考ステップも一緒に削除されます。`)) return; state.activities = state.activities.filter(x => x.id !== aid); save(); w.remove(); wsActivityId = null; renderWorkspace(); };
+  q('[data-save]').onclick = () => {
+    a.title = q('#ae_title').value.trim() || a.title; a.type = q('#ae_type').value; a.status = q('#ae_status').value;
+    a.year = q('#ae_year').value; a.season = q('#ae_season').value;
+    a.startDate = q('#ae_start').value; a.time = q('#ae_time').value; a.endDate = q('#ae_end').value; a.endTime = q('#ae_endtime').value;
+    a.locType = q('#ae_loctype').value; a.locValue = a.locType ? q('#ae_locval').value.trim() : '';
+    a.marks = marks; a.review = q('#ae_review').value; a.feedback = q('#ae_feedback').value;
+    save(); w.remove(); renderFlow();
+  };
+}
+
 /* ---- マイページ編集 ---- */
 function openMypageEditor(cid) {
   const co = companyById(cid); const m = { ...co.mypage };
@@ -969,21 +1029,56 @@ function openMypageEditor(cid) {
   w.querySelector('[data-save]').onclick = () => { co.mypage = { url: w.querySelector('#m_url').value.trim(), loginId: w.querySelector('#m_id').value.trim(), password: w.querySelector('#m_pw').value, note: w.querySelector('#m_note').value.trim() }; save(); w.remove(); renderWorkspace(); };
 }
 
+/* ---- 業界の自動分類（ルールベース） ---- */
+const INDUSTRY_RULES = [
+  [/商事|物産|商社|忠|丸紅|双日/, '商社・卸売', '総合商社'],
+  [/銀行|信託|バンク|みずほ|三菱UFJ|りそな/, '金融', '銀行'],
+  [/証券|野村|大和|SMBC日興/, '金融', '証券'],
+  [/生命|保険|損保|海上/, '金融', '保険'],
+  [/コンサル|PwC|デロイト|KPMG|EY|アクセンチュア|ベイン|マッキンゼー|BCG/, 'コンサルティング', '総合コンサル'],
+  [/ソフト|システム|テクノロジ|デジタル|楽天|サイバー|IT|DeNA|LINE|ヤフー|富士通|NEC/, 'IT・通信', 'Web・ITサービス'],
+  [/自動車|モーター|トヨタ|ホンダ|日産|デンソー/, 'メーカー', '自動車'],
+  [/電機|電気|パナソニック|ソニー|日立|東芝|三菱電機/, 'メーカー', '電機・精密'],
+  [/食品|飲料|製菓|ビール|味の素/, 'メーカー', '食品'],
+  [/広告|電通|博報堂|メディア|出版|放送|新聞/, 'マスコミ・広告', '広告・メディア'],
+  [/不動産|三井不動産|三菱地所|住友不動産|ハウス|建設|ゼネコン/, '建設・不動産', '不動産・建設'],
+  [/鉄道|航空|海運|物流|運輸|JR|ANA|JAL/, '運輸・物流', '運輸・インフラ'],
+];
+function classifyIndustry(name) {
+  const hit = INDUSTRY_RULES.find(([re]) => re.test(name || ''));
+  return hit ? { industry: hit[1], subIndustry: hit[2] } : { industry: 'その他', subIndustry: '未分類' };
+}
+
 /* ---- 企業情報編集 ---- */
 function openProfileEditor(cid) {
-  const co = companyById(cid); const d = { ...co };
-  const w = openModal(`<div class="profile-editor-modal"><div class="flow-editor-head"><div><span>COMPANY PROFILE</span><h2>企業基本情報を編集</h2><p>業界や基本情報を記録します。</p></div><button data-x>×</button></div>
+  const co = companyById(cid);
+  const w = openModal(`<div class="profile-editor-modal"><div class="flow-editor-head"><div><span>COMPANY PROFILE</span><h2>企業基本情報を編集</h2><p>業界の自動分類は保存前に手動で修正できます。</p></div><button data-x>×</button></div>
     <div class="profile-editor-body">
+      <div class="classification-box"><div><span>AI INDUSTRY CLASSIFICATION</span><strong id="p_clsview">${esc(co.industry || '未分類')} › ${esc(co.subIndustry || '—')}</strong><p id="p_clsnote">企業名から業界候補を提案します。</p></div><button data-classify>✦ 自動分類</button></div>
       <label>企業名<input id="p_name" value="${esc(co.name)}"></label>
       <label>正式企業名<input id="p_official" value="${esc(co.officialName)}"></label>
       <div class="profile-two-col"><label>業界<input id="p_industry" value="${esc(co.industry)}"></label><label>細分業界<input id="p_sub" value="${esc(co.subIndustry)}"></label><label>本社所在地<input id="p_hq" value="${esc(co.headquarters)}"></label><label>創立<input id="p_founded" value="${esc(co.founded)}"></label><label>従業員数<input id="p_emp" value="${esc(co.employees)}"></label><label>事業体制<input id="p_scale" value="${esc(co.businessScale)}"></label></div>
+      <div class="profile-two-col"><label>公式サイトURL<input id="p_site" value="${esc((co.links.find(l => l.label === '公式サイト') || {}).url || '')}" placeholder="https://..."></label><label>採用ページURL<input id="p_recruit" value="${esc((co.links.find(l => l.label === '新卒採用サイト') || {}).url || '')}" placeholder="https://..."></label></div>
       <label>企業紹介<textarea id="p_desc">${esc(co.description)}</textarea></label>
     </div>
-    <footer class="step-editor-actions"><button data-x>キャンセル</button><button data-save>保存する</button></footer></div>`);
+    <footer class="step-editor-actions" style="justify-content:space-between"><button data-del style="color:var(--red);background:var(--surface-2)">企業を削除</button><span style="display:flex;gap:8px"><button data-x>キャンセル</button><button data-save>保存する</button></span></footer></div>`);
+  const q = s => w.querySelector(s);
+  q('[data-classify]').onclick = () => { const r = classifyIndustry(q('#p_name').value + q('#p_official').value); q('#p_industry').value = r.industry; q('#p_sub').value = r.subIndustry; q('#p_clsview').textContent = `${r.industry} › ${r.subIndustry}`; q('#p_clsnote').textContent = '企業名から分類候補を更新しました。内容を確認してください。'; };
   w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => w.remove());
-  w.querySelector('[data-save]').onclick = () => {
-    const g = id => w.querySelector('#' + id).value.trim();
-    Object.assign(co, { name: g('p_name') || co.name, officialName: g('p_official'), industry: g('p_industry'), subIndustry: g('p_sub'), headquarters: g('p_hq'), founded: g('p_founded'), employees: g('p_emp'), businessScale: g('p_scale'), description: g('p_desc') });
+  q('[data-del]').onclick = () => {
+    const n = activitiesOf(cid).length;
+    if (!confirm(`企業「${co.name}」を削除しますか？\n紐づく活動 ${n}件・選考記録もすべて削除されます。取り消せません。`)) return;
+    state.activities = state.activities.filter(x => x.companyId !== cid);
+    state.companies = state.companies.filter(x => x.id !== cid);
+    delete state.companies[cid];
+    save(); w.remove(); closeWorkspace();
+  };
+  q('[data-save]').onclick = () => {
+    const g = id => q('#' + id).value.trim();
+    const links = co.links.filter(l => l.label !== '公式サイト' && l.label !== '新卒採用サイト');
+    if (g('p_site')) links.push({ label: '公式サイト', url: g('p_site') });
+    if (g('p_recruit')) links.push({ label: '新卒採用サイト', url: g('p_recruit') });
+    Object.assign(co, { name: g('p_name') || co.name, officialName: g('p_official'), industry: g('p_industry'), subIndustry: g('p_sub'), headquarters: g('p_hq'), founded: g('p_founded'), employees: g('p_emp'), businessScale: g('p_scale'), description: g('p_desc'), links });
     save(); w.remove(); renderWorkspace();
   };
 }
