@@ -255,12 +255,12 @@ function renderHome(c) {
   // 進捗リング（今週の予定の完了率＝直近ステップの passed 比率）
   const prog = weekProgress();
 
-  // 企業カード
-  let visible = companies.map(co => ({ co, act: primaryActivity(co.id) })).filter(x => x.act);
-  if (homeFilter === '締切間近') visible = visible.filter(x => activityUrgent(x.act));
-  else if (homeFilter === '結果待ち') visible = visible.filter(x => x.act.status === '結果待ち');
-  else if (homeFilter === '完了') visible = visible.filter(x => isDone(x.act));
-  else visible = visible.filter(x => homeFilter === 'すべて' || homeFilter === '進行中' ? !isDone(x.act) : true);
+  // 企業カード（活動0件の企業も表示し、到達不能にしない）
+  let visible = companies.map(co => ({ co, act: primaryActivity(co.id) }));
+  if (homeFilter === '締切間近') visible = visible.filter(x => x.act && activityUrgent(x.act));
+  else if (homeFilter === '結果待ち') visible = visible.filter(x => x.act && x.act.status === '結果待ち');
+  else if (homeFilter === '完了') visible = visible.filter(x => x.act && isDone(x.act));
+  else visible = visible.filter(x => !x.act || !isDone(x.act)); // すべて／進行中：未完了 or 活動なし
 
   c.innerHTML = `
     <section class="welcome-row">
@@ -323,16 +323,24 @@ function renderAction(it) {
   return `<button class="action-item" data-openact="${it.activityId}"><span class="time-dot ${tone}"></span><time>${it.time || (it.date === todayYMD() ? '今日' : '明日')}</time><div><strong>${esc(it.company)}</strong><small>${esc(it.label)}</small></div><span class="action-badge ${tone}">${badge}</span><b>›</b></button>`;
 }
 function companyCard(co, a) {
+  // 活動が無い企業のカード（到達可能にする）
+  if (!a) {
+    return `<button class="company-card" data-company="${co.id}">
+      <div class="company-top"><div><span class="type-tag type-説明会">企業</span><h3>${esc(co.name)}</h3><p>${esc(co.industry || 'まだ活動がありません')}</p></div><span class="status-tag status-準備中">活動なし</span></div>
+      <div class="next-box"><span>次のアクション</span><strong>活動を追加しましょう</strong><div><time>ー</time><em></em></div></div>
+    </button>`;
+  }
   const p = stepProgress(a);
   const next = nextActionOf(a);
   const statusCls = statusClass(a.status);
   const dots = a.steps.slice(0, 6);
-  const passedCount = a.steps.filter(s => s.status === 'passed').length;
+  // 直近の「未着手」ステップ（先頭からの連続通過数ではなく、実際の最初のpending）を current に
+  const currentIdx = a.steps.findIndex(s => s.status === 'pending');
   return `<button class="company-card" data-company="${co.id}">
     <div class="company-top"><div><span class="type-tag type-${a.type}">${esc(a.type)}</span><h3>${esc(co.name)}</h3><p>${esc(a.title)}</p></div><span class="status-tag ${statusCls}">${esc(a.status)}</span></div>
     <div class="next-box"><span>次のアクション</span><strong>${next ? esc(next.label) : '記録を進めましょう'}</strong><div><time>${next && next.date ? fmtJDate(next.date) : '日程未定'}</time><em>${next && next.date ? relLabel(next.date) : ''}</em></div></div>
     <div class="card-progress"><div><span>選考の進捗</span><strong>${p.pct}%</strong></div><div class="progress-track"><i style="width:${p.pct}%"></i></div></div>
-    ${dots.length ? `<div class="step-dots">${dots.map((s, i) => `<div class="${s.status === 'passed' ? 'done' : (i === passedCount ? 'current' : '')}"><i>${s.status === 'passed' ? '✓' : i + 1}</i><span>${esc(s.label)}</span></div>`).join('')}</div>` : ''}
+    ${dots.length ? `<div class="step-dots">${dots.map((s, i) => `<div class="${s.status === 'passed' ? 'done' : (i === currentIdx ? 'current' : '')}"><i>${s.status === 'passed' ? '✓' : s.status === 'failed' ? '×' : i + 1}</i><span>${esc(s.label)}</span></div>`).join('')}</div>` : ''}
   </button>`;
 }
 function statusClass(st) {
@@ -378,7 +386,7 @@ function weekProgress() {
 /* ============ 統計（データ駆動） ============ */
 function renderStats(c) {
   const acts = state.activities;
-  if (!acts.length) return renderComing(c, 'stats');
+  if (!acts.length) { c.innerHTML = `<div class="stats-page"><section class="stats-heading"><div><span class="section-kicker">ANALYTICS</span><h1>就活の統計</h1><p>記録した選考を、次の行動につながる形で確認します。</p></div></section><div class="coming-panel"><div class="ci">▥</div><h2>まだデータがありません</h2><p>企業・活動・選考ステップを記録すると、通過率や選考ファネルがここに表示されます。</p></div></div>`; return; }
   const interviews = acts.reduce((n, a) => n + a.steps.filter(s => /面接/.test(s.label) || s.label === 'GD' || s.label === '集団面接').length, 0);
   // 漏斗
   const funnelDefs = [['ES', /ES/], ['Webテスト', /Web|適性/], ['1次面接', /面接/], ['GD', /GD|集団/], ['最終面接', /最終/]];
@@ -1070,7 +1078,6 @@ function openProfileEditor(cid) {
     if (!confirm(`企業「${co.name}」を削除しますか？\n紐づく活動 ${n}件・選考記録もすべて削除されます。取り消せません。`)) return;
     state.activities = state.activities.filter(x => x.companyId !== cid);
     state.companies = state.companies.filter(x => x.id !== cid);
-    delete state.companies[cid];
     save(); w.remove(); closeWorkspace();
   };
   q('[data-save]').onclick = () => {
@@ -1208,14 +1215,10 @@ const _origRenderHome = renderHome;
 renderHome = function (c) {
   if (!homeSearch) return _origRenderHome(c);
   const q = homeSearch;
-  const saved = state.companies;
-  const filteredCompanies = saved.filter(co => co.name.toLowerCase().includes(q) || activitiesOf(co.id).some(a => (a.title + ' ' + a.type).toLowerCase().includes(q)));
-  const tmp = Object.create(state);
-  // 一時的に companies を差し替えて描画（activities はそのまま、primaryActivity は companyId 参照で安全）
   const origCompanies = state.companies;
-  state.companies = filteredCompanies;
-  _origRenderHome(c);
-  state.companies = origCompanies;
+  // 一時的に companies を絞り込んで描画（activities はそのまま。例外時も必ず元へ戻す）
+  state.companies = origCompanies.filter(co => co.name.toLowerCase().includes(q) || activitiesOf(co.id).some(a => (a.title + ' ' + a.type).toLowerCase().includes(q)));
+  try { _origRenderHome(c); } finally { state.companies = origCompanies; }
 };
 
 init();
