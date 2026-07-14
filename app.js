@@ -95,6 +95,7 @@ function normalize(s) {
     a.steps = Array.isArray(a.steps) ? a.steps : [];
     a.cohort ??= COHORT;
     a.steps.forEach(st => {
+      st.time ??= '';
       st.esQuestions = Array.isArray(st.esQuestions) ? st.esQuestions : [];
       st.record = st.record || { format: '', participants: '', theme: '', role: '', note: '', feedback: '', questions: [] };
       st.record.questions = Array.isArray(st.record.questions) ? st.record.questions : [];
@@ -146,7 +147,7 @@ function migrateFromV1() {
         const label = s.kind || 'ステップ';
         const step = {
           id: s.id || uid(), label, status: s.done ? 'passed' : 'pending',
-          date: s.date || '', deadline: '', note: s.note || '',
+          date: s.date || '', time: s.time || '', deadline: '', note: s.note || '',
           esQuestions: [], record: { format: '', participants: '', theme: '', role: '', note: '', feedback: '', questions: [] },
         };
         const qs = s.questions || [];
@@ -206,12 +207,11 @@ function renderContent() {
   if (currentView === 'interview') return renderInterviewPrep(c);
   if (currentView === 'review') return renderReview(c);
   if (currentView === 'settings') return renderSettings(c);
+  if (currentView === 'calendar') return renderCalendarView(c);
   return renderComing(c, currentView);
 }
 
-const COMING = {
-  calendar: ['□', 'カレンダー', '活動・締切・面接を月表示で管理します。次のアップデートで追加します。'],
-};
+const COMING = {};
 function renderComing(c, view) {
   const [icon, title, desc] = COMING[view] || ['◇', 'この機能', '準備中です。'];
   c.innerHTML = `<div class="coming-panel"><div class="ci">${icon}</div><h2>${title}</h2><p>${esc(desc)}</p></div>`;
@@ -998,7 +998,7 @@ function openFlowEditor(aid) {
       <section class="editor-list-section"><div><h3>現在のフロー</h3><span>${a.steps.length}ステップ</span></div><div class="editor-step-list">${a.steps.map((s, i) => `<div class="editor-step"><i>${i + 1}</i><input value="${esc(s.label)}" data-lbl="${s.id}"><input class="editor-date" value="${esc(s.date)}" data-date="${s.id}" placeholder="日程 (2027-07-20)"><div class="editor-controls"><button data-up="${s.id}" ${i === 0 ? 'disabled' : ''}>↑</button><button data-down="${s.id}" ${i === a.steps.length - 1 ? 'disabled' : ''}>↓</button><button class="delete" data-del="${s.id}" ${a.steps.length === 1 ? 'disabled' : ''}>×</button></div></div>`).join('')}</div></section>
       <footer class="flow-editor-actions"><p>変更はすぐ反映されます。</p><button data-x>完了</button></footer></div>`;
     w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => { w.remove(); renderFlow(); });
-    const addStep = label => { const st = { id: uid(), label, status: 'pending', date: '', deadline: '', note: '', esQuestions: [], record: { format: '', participants: '', theme: '', role: '', note: '', feedback: '', questions: [] } }; a.steps.push(st); flowStepId = st.id; save(); render(); };
+    const addStep = label => { const st = { id: uid(), label, status: 'pending', date: '', time: '', deadline: '', note: '', esQuestions: [], record: { format: '', participants: '', theme: '', role: '', note: '', feedback: '', questions: [] } }; a.steps.push(st); flowStepId = st.id; save(); render(); };
     w.querySelectorAll('[data-add]').forEach(b => b.onclick = () => addStep(b.dataset.add));
     w.querySelector('[data-addcustom]').onclick = () => { const v = w.querySelector('#fe_custom').value.trim(); if (v) addStep(v); };
     w.querySelectorAll('[data-lbl]').forEach(el => el.addEventListener('input', () => { const s = a.steps.find(x => x.id === el.dataset.lbl); if (s) { s.label = el.value; save(); } }));
@@ -1015,11 +1015,12 @@ function openStepEditor(aid, sid) {
   const a = activityById(aid); const s = a.steps.find(x => x.id === sid);
   const w = openModal(`<div class="step-editor-modal"><div class="flow-editor-head"><div><span>STEP SETTINGS</span><h2>${esc(s.label)}を編集</h2><p>日程、締切、メモを設定します。</p></div><button data-x>×</button></div>
     <div class="step-editor-fields"><label>ステップ名<input id="s_label" value="${esc(s.label)}"></label>
-      <div class="step-editor-date-grid"><label>日程<input id="s_date" type="date" value="${esc(s.date)}"></label><label>締切（任意）<input id="s_deadline" value="${esc(s.deadline)}" placeholder="例：2027-07-16 23:59"></label></div>
+      <div class="step-editor-date-grid"><label>日程<input id="s_date" type="date" value="${esc(s.date)}"></label><label>時刻（任意）<input id="s_time" type="time" value="${esc(s.time)}"></label></div>
+      <label>締切（任意）<input id="s_deadline" value="${esc(s.deadline)}" placeholder="例：2027-07-16 23:59"></label>
       <label>メモ<textarea id="s_note">${esc(s.note)}</textarea></label></div>
     <footer class="step-editor-actions"><button data-x>キャンセル</button><button data-save>保存する</button></footer></div>`);
   w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => w.remove());
-  w.querySelector('[data-save]').onclick = () => { s.label = w.querySelector('#s_label').value.trim() || s.label; s.date = w.querySelector('#s_date').value; s.deadline = w.querySelector('#s_deadline').value.trim(); s.note = w.querySelector('#s_note').value; save(); w.remove(); renderFlow(); };
+  w.querySelector('[data-save]').onclick = () => { s.label = w.querySelector('#s_label').value.trim() || s.label; s.date = w.querySelector('#s_date').value; s.time = w.querySelector('#s_time').value; s.deadline = w.querySelector('#s_deadline').value.trim(); s.note = w.querySelector('#s_note').value; save(); w.remove(); renderFlow(); };
 }
 
 /* ---- ES設問編集 ---- */
@@ -1041,6 +1042,48 @@ function openESEditor(aid, sid, qid) {
     if (qid) { const idx = s.esQuestions.findIndex(x => x.id === qid); s.esQuestions[idx] = nq; } else s.esQuestions.push(nq);
     save(); w.remove(); renderFlow();
   };
+}
+
+/* ============ カレンダー ============ */
+let calYear, calMonth, calSelDay = null;
+{ const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); }
+const KIND_TONE = { '締切': 't-red', '活動': '', 'ステップ': '', '予定': 't-amber' };
+
+function renderCalendarView(c) {
+  const byDate = {};
+  allDatedItems().forEach(it => { (byDate[it.date] = byDate[it.date] || []).push(it); });
+  const dows = ['日', '月', '火', '水', '木', '金', '土'];
+  const first = new Date(calYear, calMonth, 1);
+  const start = new Date(first); start.setDate(1 - first.getDay());
+  const today = todayYMD();
+  let cells = '';
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    const ds = ymd(d); const other = d.getMonth() !== calMonth;
+    const evs = (byDate[ds] || []).sort((a, b) => (a.time || '99').localeCompare(b.time || '99'));
+    const shown = evs.slice(0, 3);
+    cells += `<div class="cal-cell ${other ? 'other' : ''} ${ds === today ? 'today' : ''} ${ds === calSelDay ? 'sel' : ''}" data-day="${ds}">
+      <span class="cal-daynum">${d.getDate()}</span>
+      ${shown.map(ev => `<div class="cal-ev ${KIND_TONE[ev.kind] || ''}">${esc(ev.company)}</div>`).join('')}
+      ${evs.length > 3 ? `<div class="cal-ev more">他${evs.length - 3}件</div>` : ''}
+    </div>`;
+  }
+  const selEvs = calSelDay ? (byDate[calSelDay] || []).sort((a, b) => (a.time || '99').localeCompare(b.time || '99')) : null;
+
+  c.innerHTML = `<div class="cal-page">
+    <section class="strategy-hero"><div><span class="section-kicker">CALENDAR</span><h1>就活カレンダー</h1><p>活動・ステップ・締切・予定をまとめて確認します。</p></div></section>
+    <div class="cal-card">
+      <div class="cal-topbar"><h2>${calYear}年 ${calMonth + 1}月</h2><div class="cal-nav"><button data-cal="prev">‹</button><button class="wide" data-cal="today">今日</button><button data-cal="next">›</button></div></div>
+      <div class="cal-grid">${dows.map((d, i) => `<div class="cal-dow ${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${d}</div>`).join('')}${cells}</div>
+      ${calSelDay ? `<div class="cal-day-panel"><h3>${fmtJDate(calSelDay)} の予定</h3>${selEvs.length ? selEvs.map(ev => `<div class="cal-day-item k-${ev.kind === '締切' ? 'deadline' : 'x'}" data-openact="${ev.activityId}"><span class="cal-day-time">${ev.kind === '締切' ? '締切' : (ev.time || '終日')}</span><div><div class="cal-day-name">${esc(ev.company)}</div><div class="cal-day-kind">${esc(ev.label)}</div></div></div>`).join('') : `<div class="cal-day-empty">この日の予定はありません。</div>`}</div>` : ''}
+    </div>
+  </div>`;
+
+  c.querySelector('[data-cal="prev"]').onclick = () => { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendarView(c); };
+  c.querySelector('[data-cal="next"]').onclick = () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendarView(c); };
+  c.querySelector('[data-cal="today"]').onclick = () => { const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); calSelDay = todayYMD(); renderCalendarView(c); };
+  c.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { calSelDay = b.dataset.day; renderCalendarView(c); });
+  c.querySelectorAll('[data-openact]').forEach(b => b.onclick = () => { const a = activityById(b.dataset.openact); if (a) openCompany(a.companyId, a.id); });
 }
 
 /* ============ テーマ・検索 ============ */
