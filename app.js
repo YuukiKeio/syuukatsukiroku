@@ -913,7 +913,8 @@ function openModal(html) {
   wrap.className = 'overlay center';
   wrap.innerHTML = html;
   wrap.addEventListener('mousedown', e => { if (e.target === wrap) wrap.remove(); });
-  document.body.appendChild(wrap);
+  // #app 内に挿入（CSS変数 --line 等・ダークモードを継承させる。body直下だと変数が失われる）
+  ($('app') || document.body).appendChild(wrap);
   return wrap;
 }
 function flash(msg) { const el = $('saveFlash'); if (!el) return; el.textContent = '✓ ' + msg; el.classList.add('show'); clearTimeout(flashTimer); flashTimer = setTimeout(() => { el.classList.remove('show'); el.textContent = '✓ 保存しました'; }, 1600); }
