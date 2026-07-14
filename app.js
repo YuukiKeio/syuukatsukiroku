@@ -82,6 +82,7 @@ function normalize(s) {
   s.interviewAnswers = s.interviewAnswers && typeof s.interviewAnswers === 'object' ? s.interviewAnswers : {};
   s.answerHistory = s.answerHistory && typeof s.answerHistory === 'object' ? s.answerHistory : {};
   s.customQuestions = Array.isArray(s.customQuestions) ? s.customQuestions : [];
+  s.reviews = Array.isArray(s.reviews) ? s.reviews : [];
   s.companies.forEach(c => {
     c.links = Array.isArray(c.links) ? c.links : [];
     c.mypage = c.mypage || { url: '', loginId: '', password: '', note: '' };
@@ -203,13 +204,13 @@ function renderContent() {
   if (currentView === 'stats') return renderStats(c);
   if (currentView === 'self') return renderSelfAnalysis(c);
   if (currentView === 'interview') return renderInterviewPrep(c);
+  if (currentView === 'review') return renderReview(c);
+  if (currentView === 'settings') return renderSettings(c);
   return renderComing(c, currentView);
 }
 
 const COMING = {
-  review: ['↺', '面接復盤', '事前の想定と実際の面接を並べて比較し、次の行動を決めます。次のアップデートで追加します。'],
   calendar: ['□', 'カレンダー', '活動・締切・面接を月表示で管理します。次のアップデートで追加します。'],
-  settings: ['⋯', '設定', 'バックアップ（エクスポート／インポート）、テーマ、データ管理。次のアップデートで追加します。'],
 };
 function renderComing(c, view) {
   const [icon, title, desc] = COMING[view] || ['◇', 'この機能', '準備中です。'];
@@ -532,6 +533,103 @@ function openAddQuestion() {
     const item = { id: 'custom-' + uid(), stage: w.querySelector('#nq_s').value, category: w.querySelector('#nq_c').value.trim() || '自分で追加', question: q, focus: '実際の面接を思い出し、質問の意図と自分の回答を整理する。', source: w.querySelector('#nq_src').value };
     state.customQuestions.push(item); prepStage = item.stage; prepQId = item.id; save(); w.remove(); renderInterviewPrep($('content')); flash('質問をライブラリに追加しました');
   };
+}
+
+/* ============ 面接復盤（事前想定／実際） ============ */
+const REVIEW_FIELDS_BEFORE = [['assumptionQuestions', '聞かれると予想した質問'], ['assumptionMessage', '必ず伝えたいメッセージ'], ['assumptionRisk', '不安・失敗しそうな点']];
+const REVIEW_FIELDS_AFTER = [['actualQuestions', '実際に聞かれた質問'], ['actualAnswer', '自分が答えた内容'], ['reaction', '面接官の反応・追加質問']];
+const REVIEW_FIELDS_LEARN = [['good', 'うまくできたこと'], ['improve', '改善したいこと'], ['next', '次回までのアクション']];
+let reviewId = null, reviewMode = 'compare';
+
+function newReview() {
+  return { id: uid(), company: '', stage: '1次面接', date: todayYMD(), assumptionQuestions: '', assumptionMessage: '', assumptionRisk: '', actualQuestions: '', actualAnswer: '', reaction: '', good: '', improve: '', next: '', score: '3' };
+}
+function renderReview(c) {
+  if (!state.reviews.length) {
+    c.innerHTML = `<div class="review-page"><section class="strategy-hero review-hero"><div><span class="section-kicker">INTERVIEW REVIEW</span><h1>想定と実際を並べて、次の面接へつなぐ</h1><p>準備の精度と、本番で起きたことを混ぜずに記録します。</p></div></section>
+      <div class="empty-companies"><strong>まだ復盤がありません</strong><p>面接の事前想定と、実際の面接をふり返って記録しましょう。</p><button id="rvNew">＋ 最初の復盤を作成</button></div></div>`;
+    $('rvNew').onclick = () => { const r = newReview(); state.reviews.unshift(r); reviewId = r.id; save(); renderReview(c); };
+    return;
+  }
+  if (!reviewId || !state.reviews.some(r => r.id === reviewId)) reviewId = state.reviews[0].id;
+  const rv = state.reviews.find(r => r.id === reviewId);
+  const companyNames = [...new Set(state.companies.map(x => x.name))];
+
+  c.innerHTML = `<div class="review-page">
+    <section class="strategy-hero review-hero"><div><span class="section-kicker">INTERVIEW REVIEW</span><h1>想定と実際を並べて、次の面接へつなぐ</h1><p>準備の精度と、本番で起きたことを混ぜずに記録します。</p></div>
+      <div class="review-score"><span>自己評価</span><strong>${rv.score}<small> / 5</small></strong><input aria-label="自己評価" type="range" min="1" max="5" value="${rv.score}" data-rv="score"></div></section>
+    <div class="filter-row" style="margin:0">${state.reviews.map(r => `<button class="filter-chip ${r.id === reviewId ? 'active' : ''}" data-rvsel="${r.id}">${esc(r.company || '無題')}・${esc(r.stage)}</button>`).join('')}<button class="filter-chip" id="rvNew2">＋ 新規</button></div>
+    <section class="review-meta">
+      <label>企業名<input list="rvCompanies" value="${esc(rv.company)}" data-rv="company"><datalist id="rvCompanies">${companyNames.map(n => `<option value="${esc(n)}">`).join('')}</datalist></label>
+      <label>面接段階<select data-rv="stage">${['1次面接', '2次面接', '最終面接', 'インターン面接', 'GD'].map(s => `<option ${rv.stage === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+      <label>実施日<input type="date" value="${esc(rv.date)}" data-rv="date"></label>
+      <button id="rvDel" style="height:41px;align-self:end;border-radius:9px;background:var(--surface-2);color:var(--red);font-size:11px;font-weight:750;padding:0 14px">削除</button>
+    </section>
+    <div class="review-mode-tabs"><button class="${reviewMode === 'compare' ? 'active' : ''}" data-mode="compare">左右で比較</button><button class="${reviewMode === 'assumption' ? 'active' : ''}" data-mode="assumption">事前の想定</button><button class="${reviewMode === 'actual' ? 'active' : ''}" data-mode="actual">実際の復盤</button></div>
+    <div class="review-columns mode-${reviewMode}">
+      <section class="review-column assumption"><header><i>01</i><div><span class="section-kicker">BEFORE</span><h2>事前の想定・準備</h2><p>面接前に考えた質問、伝えたいこと、不安点</p></div><em>面接前</em></header>
+        ${REVIEW_FIELDS_BEFORE.map(([k, l]) => reviewField(k, l, rv[k])).join('')}</section>
+      <section class="review-column actual"><header><i>02</i><div><span class="section-kicker">AFTER</span><h2>実際の面接・復盤</h2><p>本当に聞かれたこと、反応、改善点</p></div><em>面接後</em></header>
+        ${REVIEW_FIELDS_AFTER.map(([k, l]) => reviewField(k, l, rv[k])).join('')}</section>
+    </div>
+    <section class="review-learning"><div class="review-learning-head"><div><span class="section-kicker">GAP & LEARNING</span><h2>差分から次の行動を決める</h2></div><strong>想定 → 実際 → 改善</strong></div>
+      <div>${REVIEW_FIELDS_LEARN.map(([k, l]) => reviewField(k, l, rv[k])).join('')}</div></section>
+  </div>`;
+
+  c.querySelectorAll('[data-rvsel]').forEach(b => b.onclick = () => { reviewId = b.dataset.rvsel; renderReview(c); });
+  const mkNew = () => { const r = newReview(); state.reviews.unshift(r); reviewId = r.id; save(); renderReview(c); };
+  $('rvNew2') && ($('rvNew2').onclick = mkNew);
+  c.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { reviewMode = b.dataset.mode; renderReview(c); });
+  $('rvDel').onclick = () => { if (!confirm('この復盤を削除しますか？')) return; state.reviews = state.reviews.filter(r => r.id !== reviewId); reviewId = null; save(); renderReview(c); };
+  c.querySelectorAll('[data-rv]').forEach(el => el.addEventListener('input', () => { rv[el.dataset.rv] = el.value; save(); }));
+}
+function reviewField(key, label, value) {
+  return `<label class="review-field"><span>${label}</span><textarea data-rv="${key}">${esc(value || '')}</textarea></label>`;
+}
+
+/* ============ 設定 ============ */
+function renderSettings(c) {
+  c.innerHTML = `<div class="strategy-page">
+    <section class="strategy-hero"><div><span class="section-kicker">SETTINGS</span><h1>設定・データ管理</h1><p>データは端末内（localStorage）に保存されます。定期的なバックアップを推奨します。</p></div></section>
+    <section class="workspace-panel" style="padding:22px">
+      <div class="workspace-title compact"><div><span class="section-kicker">BACKUP</span><h2>バックアップ</h2></div></div>
+      <p style="color:var(--sub);font-size:11px;line-height:1.8;margin:10px 0 16px">別の端末・ブラウザには引き継がれません。機種変更やデータ削除の前に、必ずエクスポートしてください。</p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">
+        <button class="primary-button" id="setExport"><span>⬇</span>エクスポート（JSON保存）</button>
+        <button class="primary-button" id="setImport" style="background:var(--surface-2);color:var(--text)"><span>⬆</span>インポート（復元）</button>
+        <input type="file" id="setFile" accept=".json,application/json" style="display:none">
+      </div>
+    </section>
+    <section class="workspace-panel" style="padding:22px">
+      <div class="workspace-title compact"><div><span class="section-kicker">APPEARANCE</span><h2>表示</h2></div></div>
+      <div style="display:flex;gap:10px;margin-top:12px"><button class="primary-button" id="setTheme" style="background:var(--surface-2);color:var(--text)"><span>${theme === 'dark' ? '☀' : '☾'}</span>${theme === 'dark' ? 'ライトモード' : 'ダークモード'}にする</button></div>
+    </section>
+    <section class="workspace-panel" style="padding:22px;border-color:color-mix(in srgb,var(--red) 25%,var(--line))">
+      <div class="workspace-title compact"><div><span class="section-kicker" style="color:var(--red)">DANGER</span><h2>データの初期化</h2></div></div>
+      <p style="color:var(--sub);font-size:11px;line-height:1.8;margin:10px 0 16px">すべての記録を削除します。取り消せません。事前にエクスポートしてください。</p>
+      <button class="primary-button" id="setReset" style="background:var(--red)"><span>⚠</span>すべてのデータを削除</button>
+    </section>
+  </div>`;
+  $('setExport').onclick = () => downloadFile(`syukatsu-kiroku-${todayYMD()}.json`, JSON.stringify(state, null, 2), 'application/json');
+  $('setImport').onclick = () => $('setFile').click();
+  $('setFile').addEventListener('change', ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f) importBackup(f); });
+  $('setTheme').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME_KEY, theme); } catch (e) {} applyTheme(); renderSettings(c); };
+  $('setReset').onclick = () => { if (!confirm('本当にすべてのデータを削除しますか？この操作は取り消せません。')) return; state = normalize(blankState()); state._migrated = true; save(); flash('データを初期化しました'); setView('home'); };
+}
+function importBackup(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data || (!Array.isArray(data.companies) && !Array.isArray(data.entries))) throw new Error('invalid');
+      if (data.entries && !data.companies) { alert('これは旧バージョンのバックアップです。旧サイトで読み込むか、そのまま新サイトを開くと自動移行されます。'); return; }
+      if (!confirm(`バックアップを読み込みます。\n企業 ${(data.companies || []).length}社・活動 ${(data.activities || []).length}件。\n現在のデータは上書きされます。よろしいですか？`)) return;
+      data._migrated = true;
+      state = normalize(data);
+      save(); flash('読み込みが完了しました'); setView('home');
+    } catch (e) { alert('ファイルを読み込めませんでした。エクスポートしたJSONを選んでください。'); }
+  };
+  reader.readAsText(file);
 }
 
 /* ============ 企業ワークスペース ============ */
