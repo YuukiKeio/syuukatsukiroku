@@ -70,14 +70,18 @@ function load() {
   if (hasData) return normalize(v2);
   // v2 が空／無し → 旧 v1 からの移行を試みる（空v2の上書き競合にも強い）
   const migrated = migrateFromV1();
-  if (migrated) { migrated._migrated = true; migrated._needsSave = true; return migrated; }
-  return blankState();
+  if (migrated) { migrated._migrated = true; migrated._needsSave = true; return normalize(migrated); }
+  return normalize(blankState());
 }
 
 function normalize(s) {
   s.companies = Array.isArray(s.companies) ? s.companies : [];
   s.activities = Array.isArray(s.activities) ? s.activities : [];
   s.schedules = Array.isArray(s.schedules) ? s.schedules : [];
+  s.selfAnalysis = s.selfAnalysis && typeof s.selfAnalysis === 'object' ? s.selfAnalysis : {};
+  s.interviewAnswers = s.interviewAnswers && typeof s.interviewAnswers === 'object' ? s.interviewAnswers : {};
+  s.answerHistory = s.answerHistory && typeof s.answerHistory === 'object' ? s.answerHistory : {};
+  s.customQuestions = Array.isArray(s.customQuestions) ? s.customQuestions : [];
   s.companies.forEach(c => {
     c.links = Array.isArray(c.links) ? c.links : [];
     c.mypage = c.mypage || { url: '', loginId: '', password: '', note: '' };
@@ -197,12 +201,12 @@ function renderContent() {
   const c = $('content');
   if (currentView === 'home') return renderHome(c);
   if (currentView === 'stats') return renderStats(c);
+  if (currentView === 'self') return renderSelfAnalysis(c);
+  if (currentView === 'interview') return renderInterviewPrep(c);
   return renderComing(c, currentView);
 }
 
 const COMING = {
-  self: ['◎', '自己分析', '原体験・強み・ガクチカなどの素材を整理し、ES・面接に再利用できます。次のアップデートで追加します。'],
-  interview: ['◫', '面接対策', '1次・2次・最終・企業別の質問ライブラリと、回答の版本管理。次のアップデートで追加します。'],
   review: ['↺', '面接復盤', '事前の想定と実際の面接を並べて比較し、次の行動を決めます。次のアップデートで追加します。'],
   calendar: ['□', 'カレンダー', '活動・締切・面接を月表示で管理します。次のアップデートで追加します。'],
   settings: ['⋯', '設定', 'バックアップ（エクスポート／インポート）、テーマ、データ管理。次のアップデートで追加します。'],
@@ -404,6 +408,130 @@ function renderStats(c) {
       </section>
     </div>
   </div>`;
+}
+
+/* ============ 自己分析 ============ */
+const ANALYSIS_TOPICS = [
+  { id: 'values', label: '原体験・価値観', icon: '◇', prompt: 'どんな瞬間に、嬉しい・悔しい・夢中だと感じましたか？', hint: '出来事 → 感情 → なぜそう感じたか、の順で書くと価値観が見つかります。', links: ['志望動機', '最終面接'] },
+  { id: 'strength', label: '強み・弱み', icon: '↗', prompt: '強みが発揮された行動と、弱みを補う工夫を書きましょう。', hint: '性格の名前だけで終わらず、再現できる行動まで具体化します。', links: ['自己PR', '1次面接'] },
+  { id: 'gakuchika', label: 'ガクチカ', icon: '★', prompt: '目標・課題・自分の行動・結果・学びを整理しましょう。', hint: 'チームの成果と、自分が実際に変えたことを分けて記録します。', links: ['ES', '1次面接', '2次面接'] },
+  { id: 'setback', label: '挫折・困難', icon: '△', prompt: 'うまくいかなかった状況から、どう立て直しましたか？', hint: '失敗の大きさより、受け止め方と行動の変化が大切です。', links: ['2次面接', '最終面接'] },
+  { id: 'axis', label: '就活の軸', icon: '⊕', prompt: '企業を選ぶ基準を3つまで挙げ、その原体験を結びつけましょう。', hint: 'どの会社にも当てはまる表現ではなく、優先順位も決めます。', links: ['企業研究', '志望動機'] },
+  { id: 'career', label: 'キャリアビジョン', icon: '→', prompt: '3年後・5年後に、誰へどんな価値を出したいですか？', hint: '役職名より、身につけたい力と挑戦したい仕事を具体化します。', links: ['2次面接', '最終面接'] },
+  { id: 'motivation', label: '志望動機の素材', icon: '✦', prompt: '業界・企業・仕事の3段階で惹かれる理由を集めましょう。', hint: '企業固有の事業や社員との接点を、自分の経験につなげます。', links: ['ES', '企業別面接'] },
+  { id: 'questions', label: '逆質問の素材', icon: '?', prompt: '仕事内容・組織・成長について、確かめたいことを書きましょう。', hint: '調べれば分かる質問ではなく、自分の仮説を添えます。', links: ['1次面接', '2次面接', '最終面接'] },
+];
+let selfTopicId = 'values';
+
+function renderSelfAnalysis(c) {
+  const notes = state.selfAnalysis;
+  const completed = ANALYSIS_TOPICS.filter(t => (notes[t.id] || '').trim().length >= 30).length;
+  const topic = ANALYSIS_TOPICS.find(t => t.id === selfTopicId) || ANALYSIS_TOPICS[0];
+  c.innerHTML = `<div class="strategy-page">
+    <section class="strategy-hero"><div><span class="section-kicker">SELF ANALYSIS</span><h1>自分の経験を、回答の土台にする</h1><p>一度整理した素材を、ES・面接・企業研究へつなげます。</p></div>
+      <div class="strategy-progress"><strong>${completed}<small> / ${ANALYSIS_TOPICS.length}</small></strong><span>素材を整理済み</span><i><b style="width:${completed / ANALYSIS_TOPICS.length * 100}%"></b></i></div></section>
+    <div class="analysis-workspace">
+      <aside class="analysis-index"><header><span class="section-kicker">ANALYSIS MAP</span><h2>自己分析の大枠</h2></header>
+        ${ANALYSIS_TOPICS.map(t => `<button class="${selfTopicId === t.id ? 'active' : ''}" data-topic="${t.id}"><i>${t.icon}</i><span><strong>${t.label}</strong><small>${(notes[t.id] || '').trim().length >= 30 ? '整理済み' : 'これから'}</small></span><b>›</b></button>`).join('')}
+      </aside>
+      <section class="analysis-editor"><header><div class="analysis-icon">${topic.icon}</div><div><span class="section-kicker">MY STORY</span><h2>${topic.label}</h2><p>${topic.prompt}</p></div></header>
+        <div class="analysis-hint"><strong>考えるヒント</strong><p>${topic.hint}</p></div>
+        <label>自分の言葉でメモ<textarea id="selfText" placeholder="箇条書きでも大丈夫です。事実と、そのとき考えたことから書いてみましょう。">${esc(notes[topic.id] || '')}</textarea></label>
+        <div class="analysis-links"><span>この素材を使う場所</span>${topic.links.map(l => `<button data-link>${l}<b>↗</b></button>`).join('')}</div>
+        <footer><span id="selfCount">${(notes[topic.id] || '').length}文字</span><em>入力は自動保存されます</em></footer>
+      </section>
+    </div>
+  </div>`;
+  c.querySelectorAll('[data-topic]').forEach(b => b.onclick = () => { selfTopicId = b.dataset.topic; renderSelfAnalysis(c); });
+  const ta = $('selfText');
+  ta.addEventListener('input', () => { state.selfAnalysis[topic.id] = ta.value; $('selfCount').textContent = ta.value.length + '文字'; save(); });
+  c.querySelectorAll('[data-link]').forEach(b => b.onclick = () => flash('面接対策の各質問から素材を引用できます'));
+}
+
+/* ============ 面接対策 ============ */
+const PREP_QUESTIONS = [
+  { id: 'first-intro', stage: '1次面接', category: '人物理解', question: '1分で自己紹介をしてください', focus: '結論を短くし、学生時代の経験と仕事への関心を一本につなぐ。', source: '強み・弱み' },
+  { id: 'first-gaku', stage: '1次面接', category: '経験', question: '学生時代に最も力を入れたことは何ですか？', focus: '目標・自分の役割・具体的な行動・結果を一貫させる。', source: 'ガクチカ' },
+  { id: 'first-axis', stage: '1次面接', category: '志望', question: '就職活動では、何を軸に企業を選んでいますか？', focus: '基準だけでなく、その軸が生まれた原体験まで説明する。', source: '就活の軸' },
+  { id: 'second-why', stage: '2次面接', category: '深掘り', question: 'その行動を選んだ理由と、他の選択肢を教えてください', focus: '判断基準と試行錯誤を示し、偶然の成功に見せない。', source: 'ガクチカ' },
+  { id: 'second-conflict', stage: '2次面接', category: '協働', question: '意見が対立したとき、どのように合意をつくりましたか？', focus: '相手の理解、論点整理、自分の働きかけを具体化する。', source: '挫折・困難' },
+  { id: 'second-career', stage: '2次面接', category: 'キャリア', question: '入社後、どの仕事でどんな力を身につけたいですか？', focus: '実際の部署・仕事と、自分が出したい価値を接続する。', source: 'キャリアビジョン' },
+  { id: 'final-motivation', stage: '最終面接', category: '志望度', question: 'なぜ他社ではなく、当社を選ぶのですか？', focus: '企業固有の事業・人・文化と、自分の原体験を結ぶ。', source: '志望動機の素材' },
+  { id: 'final-commit', stage: '最終面接', category: '意思', question: '入社後に実現したいことを、自分の言葉で教えてください', focus: '借り物の言葉を避け、長期の方向性と最初の一歩を示す。', source: 'キャリアビジョン' },
+];
+const SOURCE_MAP = { '強み・弱み': 'strength', 'ガクチカ': 'gakuchika', '就活の軸': 'axis', '挫折・困難': 'setback', 'キャリアビジョン': 'career', '志望動機の素材': 'motivation', '企業研究': 'motivation' };
+const PREP_STAGES = ['1次面接', '2次面接', '最終面接', '企業別'];
+let prepStage = '1次面接', prepQId = 'first-intro', prepMaterialOpen = false, prepHistoryOpen = false;
+
+function allPrepQuestions() { return [...PREP_QUESTIONS, ...state.customQuestions]; }
+
+function renderInterviewPrep(c) {
+  const all = allPrepQuestions();
+  const visible = all.filter(q => q.stage === prepStage);
+  if (!visible.some(q => q.id === prepQId)) prepQId = visible[0] ? visible[0].id : '';
+  const q = all.find(x => x.id === prepQId) || visible[0];
+  const answer = q ? (state.interviewAnswers[q.id] || '') : '';
+  const srcId = q ? (SOURCE_MAP[q.source] || 'values') : 'values';
+  const srcTopic = ANALYSIS_TOPICS.find(t => t.id === srcId) || ANALYSIS_TOPICS[0];
+  const srcText = state.selfAnalysis[srcId] || '';
+  const hist = q ? (state.answerHistory[q.id] || []) : [];
+
+  c.innerHTML = `<div class="strategy-page">
+    <section class="strategy-hero interview"><div><span class="section-kicker">INTERVIEW PREP</span><h1>面接の深さに合わせて、回答を磨く</h1><p>自己分析の素材を整理し、丸写しではない自分の回答を作ります。</p></div><div class="prep-badge"><strong>${COHORT}</strong><span>質問ライブラリ</span></div></section>
+    <div class="stage-tabs">${PREP_STAGES.map(s => `<button class="${prepStage === s ? 'active' : ''}" data-stage="${s}">${s}<span>${all.filter(x => x.stage === s).length}</span></button>`).join('')}</div>
+    <div class="prep-actions"><div><strong>${prepStage}</strong><span>資料の基本質問＋あなたの実体験</span></div><button data-addq>＋ 質問を追加</button></div>
+    <div class="prep-workspace">
+      <aside class="question-list"><header><span class="section-kicker">${prepStage}</span><h2>練習する質問</h2></header>
+        ${visible.length ? visible.map(item => `<button class="${prepQId === item.id ? 'active' : ''}" data-q="${item.id}"><span>${esc(item.category)}</span><strong>${esc(item.question)}</strong><small>${(state.interviewAnswers[item.id] || '').trim() ? '回答あり' : '未回答'}</small></button>`).join('') : `<p style="color:var(--sub);font-size:11px;padding:10px">この段階の質問がありません。「＋ 質問を追加」で追加できます。</p>`}
+      </aside>
+      ${q ? `<section class="answer-studio"><header><div><span class="section-kicker">${esc(q.category)}</span><h2>${esc(q.question)}</h2></div><button data-savea>保存</button></header>
+        <div class="answer-focus"><span>回答のチェックポイント</span><p>${esc(q.focus)}</p></div>
+        <div class="material-link"><div><span>自己分析から参照</span><strong>${srcTopic.label}</strong></div><button data-material>${prepMaterialOpen ? '閉じる' : '素材を見る'} ›</button></div>
+        ${prepMaterialOpen ? `<div class="material-preview ${srcText.trim() ? '' : 'empty'}"><div><span>${srcText.trim() ? '保存されている素材' : 'まだ素材がありません'}</span><p>${srcText.trim() ? esc(srcText) : `左メニューの「自己分析」から「${srcTopic.label}」を記入すると、ここに表示されます。`}</p></div>${srcText.trim() ? `<button data-insert>回答に挿入</button>` : ''}</div>` : ''}
+        <label>自分の回答<textarea id="prepAnswer" placeholder="まずは話し言葉で書いてみましょう。結論 → 具体例 → 仕事への接続、を意識します。">${esc(answer)}</textarea></label>
+        <div class="answer-score"><span>セルフチェック</span>${['一貫性', '具体性', '自分の行動', '仕事との接続'].map(x => `<label><input type="checkbox">${x}</label>`).join('')}</div>
+        <footer><span id="prepCount">${answer.length}文字</span><button data-history>保存履歴 ${hist.length}件 ${prepHistoryOpen ? '⌃' : '⌄'}</button><em>目安：1分回答は250〜300文字程度</em></footer>
+        ${prepHistoryOpen ? `<div class="answer-history">${hist.length ? hist.map((v, i) => `<article><div><strong>Version ${hist.length - i}</strong><span>${esc(v.savedAt)}</span></div><p>${esc(v.text)}</p><button data-restore="${i}">この回答を復元</button></article>`).join('') : `<p class="history-empty">回答を保存すると、ここに過去のバージョンが残ります。</p>`}</div>` : ''}
+      </section>` : `<section class="answer-studio"><p style="color:var(--sub);font-size:12px;padding:20px">質問を追加すると、ここに回答スタジオが表示されます。</p></section>`}
+    </div>
+    <p class="reference-note">参考資料は質問傾向と回答設計の整理に利用し、掲載文面をそのまま転載していません。</p>
+  </div>`;
+
+  c.querySelectorAll('[data-stage]').forEach(b => b.onclick = () => { prepStage = b.dataset.stage; prepMaterialOpen = false; prepHistoryOpen = false; renderInterviewPrep(c); });
+  c.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { prepQId = b.dataset.q; prepMaterialOpen = false; prepHistoryOpen = false; renderInterviewPrep(c); });
+  c.querySelector('[data-addq]') && (c.querySelector('[data-addq]').onclick = () => openAddQuestion());
+  if (!q) return;
+  const ta = $('prepAnswer');
+  ta && ta.addEventListener('input', () => { state.interviewAnswers[q.id] = ta.value; $('prepCount').textContent = ta.value.length + '文字'; save(); });
+  c.querySelector('[data-material]') && (c.querySelector('[data-material]').onclick = () => { prepMaterialOpen = !prepMaterialOpen; renderInterviewPrep(c); });
+  c.querySelector('[data-insert]') && (c.querySelector('[data-insert]').onclick = () => { const cur = state.interviewAnswers[q.id] || ''; state.interviewAnswers[q.id] = (cur.trim() ? cur.trim() + '\n\n' : '') + `【${srcTopic.label}から引用】\n${srcText}`; prepMaterialOpen = false; save(); renderInterviewPrep(c); flash('自己分析の素材を回答へ追加しました'); });
+  c.querySelector('[data-history]') && (c.querySelector('[data-history]').onclick = () => { prepHistoryOpen = !prepHistoryOpen; renderInterviewPrep(c); });
+  c.querySelector('[data-savea]') && (c.querySelector('[data-savea]').onclick = () => savePrepVersion(q, c));
+  c.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => { const v = (state.answerHistory[q.id] || [])[Number(b.dataset.restore)]; if (v) { state.interviewAnswers[q.id] = v.text; save(); renderInterviewPrep(c); flash('保存した回答を復元しました'); } });
+}
+function savePrepVersion(q, c) {
+  const text = state.interviewAnswers[q.id] || '';
+  const list = state.answerHistory[q.id] || [];
+  const latest = list[0] && list[0].text;
+  if (text.trim() && text !== latest) {
+    const stamp = new Date().toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    state.answerHistory[q.id] = [{ text, savedAt: stamp }, ...list].slice(0, 8);
+    save(); renderInterviewPrep(c); flash('回答を保存し、バージョンを記録しました');
+  } else { flash('保存しました'); }
+}
+function openAddQuestion() {
+  const w = openModal(`<div class="quick-modal"><div class="modal-head"><div><span>NEW QUESTION</span><h2>質問を追加</h2></div><button data-x>×</button></div>
+    <label>質問内容<input id="nq_q" placeholder="例：最近関心を持ったニュースは何ですか？"></label>
+    <label>分類<input id="nq_c" placeholder="例：企業理解"></label>
+    <label>段階<select id="nq_s">${PREP_STAGES.map(s => `<option ${s === prepStage ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+    <label>関連する自己分析<select id="nq_src">${ANALYSIS_TOPICS.map(t => `<option>${t.label}</option>`).join('')}</select></label>
+    <div class="modal-actions"><button data-x>キャンセル</button><button data-save>追加する</button></div></div>`);
+  w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => w.remove());
+  w.querySelector('[data-save]').onclick = () => {
+    const q = w.querySelector('#nq_q').value.trim(); if (!q) return alert('質問内容を入力してください');
+    const item = { id: 'custom-' + uid(), stage: w.querySelector('#nq_s').value, category: w.querySelector('#nq_c').value.trim() || '自分で追加', question: q, focus: '実際の面接を思い出し、質問の意図と自分の回答を整理する。', source: w.querySelector('#nq_src').value };
+    state.customQuestions.push(item); prepStage = item.stage; prepQId = item.id; save(); w.remove(); renderInterviewPrep($('content')); flash('質問をライブラリに追加しました');
+  };
 }
 
 /* ============ 企業ワークスペース ============ */
