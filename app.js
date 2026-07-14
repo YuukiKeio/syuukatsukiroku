@@ -283,7 +283,7 @@ function renderHome(c) {
       <section class="panel action-panel">
         <div class="panel-heading"><div><span class="section-kicker">NEXT ACTION</span><h2>直近のアクション</h2></div></div>
         <div class="timeline">
-          ${actions.length ? actions.map(renderAction).join('') : `<p style="color:var(--sub);font-size:12px;padding:14px 0">今日・明日の予定はありません。</p>`}
+          ${actions.length ? actions.map(renderAction).join('') : `<p style="color:var(--sub);font-size:15px;padding:14px 0">今日・明日の予定はありません。</p>`}
         </div>
       </section>
       <section class="panel progress-panel">
@@ -413,7 +413,7 @@ function renderStats(c) {
     </section>
     <div class="stats-grid">
       <section class="stats-card funnel-card"><header><div><span class="section-kicker">SELECTION FUNNEL</span><h2>段階別の通過状況</h2></div></header>
-        <div class="funnel-list">${funnel.length ? funnel.map(f => `<div><div><strong>${f.label}</strong><span>${f.passed} / ${f.total}件</span><em>${Math.round(f.passed / f.total * 100)}%</em></div><i><b style="width:${Math.round(f.passed / f.total * 100)}%"></b></i></div>`).join('') : `<p style="color:var(--sub);font-size:11px">ステップを記録すると集計されます。</p>`}</div>
+        <div class="funnel-list">${funnel.length ? funnel.map(f => `<div><div><strong>${f.label}</strong><span>${f.passed} / ${f.total}件</span><em>${Math.round(f.passed / f.total * 100)}%</em></div><i><b style="width:${Math.round(f.passed / f.total * 100)}%"></b></i></div>`).join('') : `<p style="color:var(--sub);font-size:14px">ステップを記録すると集計されます。</p>`}</div>
       </section>
       <section class="stats-card outcome-card"><header><div><span class="section-kicker">RESULTS</span><h2>現在の選考結果</h2></div></header>
         <div class="donut"><div><strong>${state.companies.length}</strong><span>企業</span></div></div>
@@ -495,7 +495,7 @@ function renderInterviewPrep(c) {
     <div class="prep-actions"><div><strong>${prepStage}</strong><span>資料の基本質問＋あなたの実体験</span></div><button data-addq>＋ 質問を追加</button></div>
     <div class="prep-workspace">
       <aside class="question-list"><header><span class="section-kicker">${prepStage}</span><h2>練習する質問</h2></header>
-        ${visible.length ? visible.map(item => `<button class="${prepQId === item.id ? 'active' : ''}" data-q="${item.id}"><span>${esc(item.category)}</span><strong>${esc(item.question)}</strong><small>${(state.interviewAnswers[item.id] || '').trim() ? '回答あり' : '未回答'}</small></button>`).join('') : `<p style="color:var(--sub);font-size:11px;padding:10px">この段階の質問がありません。「＋ 質問を追加」で追加できます。</p>`}
+        ${visible.length ? visible.map(item => `<button class="${prepQId === item.id ? 'active' : ''}" data-q="${item.id}"><span>${esc(item.category)}</span><strong>${esc(item.question)}</strong><small>${(state.interviewAnswers[item.id] || '').trim() ? '回答あり' : '未回答'}</small></button>`).join('') : `<p style="color:var(--sub);font-size:14px;padding:10px">この段階の質問がありません。「＋ 質問を追加」で追加できます。</p>`}
       </aside>
       ${q ? `<section class="answer-studio"><header><div><span class="section-kicker">${esc(q.category)}</span><h2>${esc(q.question)}</h2></div><button data-savea>保存</button></header>
         <div class="answer-focus"><span>回答のチェックポイント</span><p>${esc(q.focus)}</p></div>
@@ -505,7 +505,7 @@ function renderInterviewPrep(c) {
         <div class="answer-score"><span>セルフチェック</span>${['一貫性', '具体性', '自分の行動', '仕事との接続'].map(x => `<label><input type="checkbox">${x}</label>`).join('')}</div>
         <footer><span id="prepCount">${answer.length}文字</span><button data-history>保存履歴 ${hist.length}件 ${prepHistoryOpen ? '⌃' : '⌄'}</button><em>目安：1分回答は250〜300文字程度</em></footer>
         ${prepHistoryOpen ? `<div class="answer-history">${hist.length ? hist.map((v, i) => `<article><div><strong>Version ${hist.length - i}</strong><span>${esc(v.savedAt)}</span></div><p>${esc(v.text)}</p><button data-restore="${i}">この回答を復元</button></article>`).join('') : `<p class="history-empty">回答を保存すると、ここに過去のバージョンが残ります。</p>`}</div>` : ''}
-      </section>` : `<section class="answer-studio"><p style="color:var(--sub);font-size:12px;padding:20px">質問を追加すると、ここに回答スタジオが表示されます。</p></section>`}
+      </section>` : `<section class="answer-studio"><p style="color:var(--sub);font-size:15px;padding:20px">質問を追加すると、ここに回答スタジオが表示されます。</p></section>`}
     </div>
     <p class="reference-note">参考資料は質問傾向と回答設計の整理に利用し、掲載文面をそのまま転載していません。</p>
   </div>`;
@@ -575,7 +575,7 @@ function renderReview(c) {
       <label>企業名<input list="rvCompanies" value="${esc(rv.company)}" data-rv="company"><datalist id="rvCompanies">${companyNames.map(n => `<option value="${esc(n)}">`).join('')}</datalist></label>
       <label>面接段階<select data-rv="stage">${['1次面接', '2次面接', '最終面接', 'インターン面接', 'GD'].map(s => `<option ${rv.stage === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
       <label>実施日<input type="date" value="${esc(rv.date)}" data-rv="date"></label>
-      <button id="rvDel" style="height:41px;align-self:end;border-radius:9px;background:var(--surface-2);color:var(--red);font-size:11px;font-weight:750;padding:0 14px">削除</button>
+      <button id="rvDel" style="height:41px;align-self:end;border-radius:9px;background:var(--surface-2);color:var(--red);font-size:14px;font-weight:750;padding:0 14px">削除</button>
     </section>
     <div class="review-mode-tabs"><button class="${reviewMode === 'compare' ? 'active' : ''}" data-mode="compare">左右で比較</button><button class="${reviewMode === 'assumption' ? 'active' : ''}" data-mode="assumption">事前の想定</button><button class="${reviewMode === 'actual' ? 'active' : ''}" data-mode="actual">実際の復盤</button></div>
     <div class="review-columns mode-${reviewMode}">
@@ -605,7 +605,7 @@ function renderSettings(c) {
     <section class="strategy-hero"><div><span class="section-kicker">SETTINGS</span><h1>設定・データ管理</h1><p>データは端末内（localStorage）に保存されます。定期的なバックアップを推奨します。</p></div></section>
     <section class="workspace-panel" style="padding:22px">
       <div class="workspace-title compact"><div><span class="section-kicker">BACKUP</span><h2>バックアップ</h2></div></div>
-      <p style="color:var(--sub);font-size:11px;line-height:1.8;margin:10px 0 16px">別の端末・ブラウザには引き継がれません。機種変更やデータ削除の前に、必ずエクスポートしてください。</p>
+      <p style="color:var(--sub);font-size:14px;line-height:1.8;margin:10px 0 16px">別の端末・ブラウザには引き継がれません。機種変更やデータ削除の前に、必ずエクスポートしてください。</p>
       <div style="display:flex;flex-wrap:wrap;gap:10px">
         <button class="primary-button" id="setExport"><span>⬇</span>エクスポート（JSON保存）</button>
         <button class="primary-button" id="setImport" style="background:var(--surface-2);color:var(--text)"><span>⬆</span>インポート（復元）</button>
@@ -618,12 +618,12 @@ function renderSettings(c) {
     </section>
     ${hasV1Backup() ? `<section class="workspace-panel" style="padding:22px;border-color:color-mix(in srgb,var(--amber) 30%,var(--line))">
       <div class="workspace-title compact"><div><span class="section-kicker" style="color:var(--amber)">RE-MIGRATE</span><h2>旧データから再移行</h2></div></div>
-      <p style="color:var(--sub);font-size:11px;line-height:1.8;margin:10px 0 16px">旧バージョン(v1)のバックアップから、企業・活動・選考ステップ(ステップ時刻を含む)をもう一度移行します。<strong style="color:var(--red)">現在の新データは上書きされます。</strong>先にエクスポートしてください。</p>
+      <p style="color:var(--sub);font-size:14px;line-height:1.8;margin:10px 0 16px">旧バージョン(v1)のバックアップから、企業・活動・選考ステップ(ステップ時刻を含む)をもう一度移行します。<strong style="color:var(--red)">現在の新データは上書きされます。</strong>先にエクスポートしてください。</p>
       <button class="primary-button" id="setRemigrate" style="background:var(--amber)"><span>↺</span>旧データから再移行する</button>
     </section>` : ''}
     <section class="workspace-panel" style="padding:22px;border-color:color-mix(in srgb,var(--red) 25%,var(--line))">
       <div class="workspace-title compact"><div><span class="section-kicker" style="color:var(--red)">DANGER</span><h2>データの初期化</h2></div></div>
-      <p style="color:var(--sub);font-size:11px;line-height:1.8;margin:10px 0 16px">すべての記録を削除します。取り消せません。事前にエクスポートしてください。</p>
+      <p style="color:var(--sub);font-size:14px;line-height:1.8;margin:10px 0 16px">すべての記録を削除します。取り消せません。事前にエクスポートしてください。</p>
       <button class="primary-button" id="setReset" style="background:var(--red)"><span>⚠</span>すべてのデータを削除</button>
     </section>
   </div>`;
@@ -805,18 +805,18 @@ function renderFlow() {
   $('overlayRoot').innerHTML = `<div class="company-workspace"><main class="company-page-main">
     <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 11px 3px">
       <button class="flow-back" id="flowBack"><span>‹</span>${esc(co.name)} の活動に戻る</button>
-      <button id="actEdit" style="height:32px;padding:0 13px;border-radius:9px;background:var(--primary-soft);color:var(--primary);font-size:10px;font-weight:800">⚙ 活動を編集</button>
+      <button id="actEdit" style="height:32px;padding:0 13px;border-radius:9px;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:800">⚙ 活動を編集</button>
     </div>
     <section class="flow-event-header workspace-panel">
       <div class="flow-event-icon">${esc(a.season.slice(0, 2))}</div>
       <div><div class="flow-event-tags"><span>${COHORT}</span><span>${esc(a.type)}</span><span>${esc(a.year)}年</span><span>${esc(a.status)}</span>${(a.marks || []).map(m => `<span class="saved-tag">✓ ${esc(m)}</span>`).join('')}</div><h2>${esc(a.title)}</h2><p>${esc(co.name)} ・ ${dateLine}</p></div>
       <div class="flow-summary"><span>進捗</span><strong>${p.passed}<small> / ${a.steps.length}</small></strong><em class="${failed ? 'failed' : 'active'}">${failed ? '選考終了' : '選考中'}</em></div>
     </section>
-    ${(a.review || a.feedback) ? `<section class="workspace-panel" style="padding:16px 20px;margin-top:13px"><div class="workspace-title compact"><div><span>REFLECTION</span><h2>振り返り・フィードバック</h2></div></div>${a.review ? `<p style="color:var(--text);font-size:11px;line-height:1.8;margin:10px 0 0">📝 ${esc(a.review)}</p>` : ''}${a.feedback ? `<p style="color:var(--sub);font-size:11px;line-height:1.8;margin:8px 0 0">💬 ${esc(a.feedback)}</p>` : ''}</section>` : ''}
+    ${(a.review || a.feedback) ? `<section class="workspace-panel" style="padding:16px 20px;margin-top:13px"><div class="workspace-title compact"><div><span>REFLECTION</span><h2>振り返り・フィードバック</h2></div></div>${a.review ? `<p style="color:var(--text);font-size:14px;line-height:1.8;margin:10px 0 0">📝 ${esc(a.review)}</p>` : ''}${a.feedback ? `<p style="color:var(--sub);font-size:14px;line-height:1.8;margin:8px 0 0">💬 ${esc(a.feedback)}</p>` : ''}</section>` : ''}
 
     <section class="workspace-panel flow-map-panel">
       <div class="workspace-title"><div><span>SELECTION FLOW</span><h2>選考プロセス</h2></div><div class="flow-toolbar"><button id="flowEdit">＋ フローを編集</button><div class="flow-legend"><span><i class="passed"></i>通過</span><span><i class="failed"></i>落選</span><span><i class="pending"></i>未定</span></div></div></div>
-      <div class="flow-scroll"><div class="flow-nodes">${a.steps.map((s, i) => `<div class="flow-node-wrap"><button class="flow-node ${s.status} ${flowStepId === s.id ? 'selected' : ''}" data-node="${s.id}"><i>${s.status === 'passed' ? '✓' : s.status === 'failed' ? '×' : i + 1}</i><strong>${esc(s.label)}</strong><small>${s.status === 'passed' ? '通過' : s.status === 'failed' ? '落選' : '未定'}</small></button>${i < a.steps.length - 1 ? `<span class="flow-connector ${s.status}"><i>›</i></span>` : ''}</div>`).join('') || '<p style="color:var(--sub);font-size:11px">ステップがありません。「フローを編集」から追加してください。</p>'}</div></div>
+      <div class="flow-scroll"><div class="flow-nodes">${a.steps.map((s, i) => `<div class="flow-node-wrap"><button class="flow-node ${s.status} ${flowStepId === s.id ? 'selected' : ''}" data-node="${s.id}"><i>${s.status === 'passed' ? '✓' : s.status === 'failed' ? '×' : i + 1}</i><strong>${esc(s.label)}</strong><small>${s.status === 'passed' ? '通過' : s.status === 'failed' ? '落選' : '未定'}</small></button>${i < a.steps.length - 1 ? `<span class="flow-connector ${s.status}"><i>›</i></span>` : ''}</div>`).join('') || '<p style="color:var(--sub);font-size:14px">ステップがありません。「フローを編集」から追加してください。</p>'}</div></div>
       <p class="flow-hint">各ステップをクリックすると、詳細の確認・編集ができます。</p>
     </section>
 
@@ -883,8 +883,8 @@ function interviewDetailHTML(s) {
 }
 function genericDetailHTML(s) {
   return `<div class="generic-detail"><div class="detail-section-title"><div><span>NOTE</span><h3>${esc(s.label)}のメモ</h3></div></div>
-    <label class="mini-label" style="display:block;color:var(--sub);font-size:8px;font-weight:750;margin-top:13px">記録・メモ</label>
-    <textarea data-rec="note" style="width:100%;min-height:120px;margin-top:5px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--text);font-size:9px;line-height:1.7;outline:0;resize:vertical" placeholder="日程、内容、感想などを記録できます。">${esc(s.note)}</textarea></div>`;
+    <label class="mini-label" style="display:block;color:var(--sub);font-size:11px;font-weight:750;margin-top:13px">記録・メモ</label>
+    <textarea data-rec="note" style="width:100%;min-height:120px;margin-top:5px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--text);font-size:12px;line-height:1.7;outline:0;resize:vertical" placeholder="日程、内容、感想などを記録できます。">${esc(s.note)}</textarea></div>`;
 }
 function bindStepDetail(a, s) {
   const root = $('overlayRoot');
