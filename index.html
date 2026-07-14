@@ -3,173 +3,50 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>就活記録</title>
+<title>就活キロク</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<header>
-  <div class="header-inner">
-    <div class="logo">就活<span>キロク</span></div>
-    <div class="header-right">
-      <span class="save-status" id="saveStatus">✓ 保存済み</span>
-      <button class="gear-btn" id="themeBtn" title="ダークモード切替">🌙</button>
-      <button class="gear-btn" id="openBackupBtn" title="バックアップ">⚙</button>
-      <button class="add-btn" id="openAddBtn" title="新規追加">＋</button>
+<div class="app" id="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">キ</span><span>就活キロク</span></div>
+    <nav aria-label="メインナビゲーション" id="sideNav">
+      <button class="nav-item" data-view="home"><span>⌂</span>ホーム</button>
+      <button class="nav-item" data-view="self"><span>◎</span>自己分析</button>
+      <button class="nav-item" data-view="interview"><span>◫</span>面接対策</button>
+      <button class="nav-item" data-view="review"><span>↺</span>面接復盤</button>
+      <button class="nav-item" data-view="stats"><span>▥</span>統計</button>
+      <button class="nav-item" data-view="calendar"><span>□</span>カレンダー</button>
+      <button class="nav-item" data-view="settings"><span>⋯</span>設定</button>
+    </nav>
+    <div class="privacy-note">
+      <span class="privacy-icon">✓</span>
+      <div><strong>端末内に保存</strong><small>データは外部に送信されません</small></div>
     </div>
-  </div>
-</header>
+    <button class="theme-button" id="themeBtn"><span>☾</span>ダークモード</button>
+  </aside>
 
-<div class="container">
+  <main class="main-shell">
+    <header class="topbar">
+      <div class="mobile-brand"><span class="brand-mark">キ</span>就活キロク</div>
+      <div class="search-box"><span>⌕</span><input id="searchInput" aria-label="検索" placeholder="会社名・活動名で検索"></div>
+      <button class="icon-button" aria-label="通知">●<span class="notification-dot"></span></button>
+      <button class="avatar" aria-label="プロフィール">Y</button>
+    </header>
+    <div class="content" id="content"></div>
+  </main>
 
-  <!-- 今日・明日の予定バナー -->
-  <div id="todayBanner"></div>
+  <nav class="bottom-nav" aria-label="モバイルナビゲーション" id="bottomNav">
+    <button data-view="home"><span>⌂</span>ホーム</button>
+    <button data-view="self"><span>◎</span>自己分析</button>
+    <button class="bottom-add" id="bottomAdd" aria-label="記録を追加">＋</button>
+    <button data-view="interview"><span>◫</span>面接</button>
+    <button data-view="stats"><span>▥</span>統計</button>
+  </nav>
 
-  <!-- 検索 -->
-  <div class="search-wrap">
-    <input type="text" id="searchInput" placeholder="🔍 会社名・種類で検索">
-  </div>
-
-  <!-- 進行中 -->
-  <div class="section">
-    <div class="section-title">
-      <span class="dot" style="background:var(--accent)"></span>進行中
-      <span class="count" id="countOngoing">0</span>
-    </div>
-    <div class="card-list" id="listOngoing"></div>
-  </div>
-
-  <!-- 予定 / 振り返り -->
-  <div class="section two-col">
-    <div>
-      <div class="section-title">
-        <span class="dot" style="background:var(--orange)"></span>これからの予定
-        <span class="count" id="countUpcoming" style="background:var(--orange)">0</span>
-      </div>
-      <div class="card-list" id="listUpcoming"></div>
-    </div>
-    <div>
-      <div class="section-title">
-        <span class="dot" style="background:var(--green)"></span>振り返り
-        <span class="count" id="countDone" style="background:var(--green)">0</span>
-      </div>
-      <div class="card-list" id="listDone"></div>
-    </div>
-  </div>
-
-  <!-- 統計 -->
-  <div class="section">
-    <div class="section-title section-toggle" id="statsToggle">
-      <span>📊 統計</span>
-      <span class="toggle-chev" id="statsChev">▾</span>
-    </div>
-    <div id="statsArea"></div>
-  </div>
-
-  <!-- カレンダー -->
-  <div class="section">
-    <div class="section-title">📅 カレンダー</div>
-    <div class="calendar-wrap">
-      <div class="cal-head">
-        <div class="cal-title" id="calTitle"></div>
-        <div class="cal-nav">
-          <button id="calPrev">‹</button>
-          <button class="today-btn" id="calToday">今日</button>
-          <button id="calNext">›</button>
-        </div>
-      </div>
-      <div class="cal-grid" id="calGrid"></div>
-      <div class="day-events" id="dayEvents" style="display:none"></div>
-    </div>
-  </div>
-
+  <div id="overlayRoot"></div>
+  <div class="save-flash" id="saveFlash">✓ 保存しました</div>
 </div>
-
-<!-- 新規追加モーダル -->
-<div class="overlay" id="addOverlay">
-  <div class="modal">
-    <h2>新規追加</h2>
-    <div class="field" style="position:relative">
-      <label>会社名・タイトル</label>
-      <input type="text" id="addName" placeholder="例：〇〇株式会社" autocomplete="off">
-      <div class="suggest-box" id="nameSuggest" style="display:none"></div>
-    </div>
-    <div class="field">
-      <label>活動名（任意）</label>
-      <input type="text" id="addSubtitle" placeholder="例：1day仕事体験、夏季5daysコース">
-    </div>
-    <div class="field">
-      <label>種類</label>
-      <div class="type-options" id="typeOptions"></div>
-    </div>
-    <div class="field" id="customTypeField" style="display:none">
-      <label>カスタム種類名</label>
-      <input type="text" id="customTypeInput" placeholder="例：座談会">
-    </div>
-    <div class="field">
-      <label>日程（任意）</label>
-      <div class="dt-row">
-        <span class="dt-label">開始</span>
-        <input type="date" id="addStartDate">
-        <input type="time" id="addTime">
-      </div>
-      <div class="dt-row">
-        <span class="dt-label">終了</span>
-        <input type="date" id="addEndDate">
-        <input type="time" id="addEndTime">
-      </div>
-    </div>
-    <div class="field">
-      <label>場所（任意）</label>
-      <div class="type-options" id="locOptions">
-        <button class="type-chip" data-loc="">なし</button>
-        <button class="type-chip" data-loc="online">オンライン</button>
-        <button class="type-chip" data-loc="offline">対面</button>
-      </div>
-      <div id="locValueWrap" style="display:none; margin-top:8px">
-        <input type="text" id="addLocValue" placeholder="">
-      </div>
-    </div>
-    <div class="field">
-      <label>ステータス</label>
-      <select id="addStatus">
-        <option value="ongoing">進行中</option>
-        <option value="upcoming">これからの予定</option>
-        <option value="done">振り返り（終了）</option>
-      </select>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" id="addCancel">キャンセル</button>
-      <button class="btn btn-primary" id="addSave">追加する</button>
-    </div>
-  </div>
-</div>
-
-<!-- バックアップモーダル -->
-<div class="overlay" id="backupOverlay">
-  <div class="modal">
-    <h2>⚙ データのバックアップ</h2>
-    <p class="backup-note">
-      記録はこのブラウザ内（localStorage）に自動保存されています。<br>
-      <strong>別の端末・ブラウザには引き継がれない</strong>ため、定期的にエクスポートしてバックアップするのがおすすめです。
-      機種変更やブラウザのデータ削除の前には必ずエクスポートしてください。
-    </p>
-    <div class="backup-actions">
-      <button class="btn btn-primary" id="exportBtn">⬇ エクスポート（JSON保存）</button>
-      <button class="btn btn-outline" id="importBtn">⬆ インポート（復元）</button>
-      <input type="file" id="importFile" accept=".json,application/json" style="display:none">
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" id="backupClose">閉じる</button>
-    </div>
-  </div>
-</div>
-
-<!-- 詳細モーダル -->
-<div class="overlay" id="detailOverlay">
-  <div class="modal detail-modal" id="detailModal"></div>
-</div>
-
 <script src="app.js"></script>
 </body>
 </html>

@@ -1,1107 +1,857 @@
 /* =========================================================
-   就活キロク — app.js
-   定数 → ユーティリティ → 状態・保存 → 表示ヘルパー →
-   ICS書き出し → 企業情報 → ホーム → 統計 → 新規追加 →
-   詳細 → 企業ページ → カレンダー → バックアップ →
-   検索・テーマ → イベント登録・初期化
+   就活キロク v2 — app.js
+   企業主軸のデータモデル。旧 v1 データを自動移行。
+   本ファイル = マイルストーン1（ホーム／企業／選考フロー／作成センター）
+   知識モジュール（自己分析・面接対策・面接復盤・統計）は次段階。
    ========================================================= */
 'use strict';
 
 /* ============ 定数 ============ */
-const STORAGE_KEY = 'syuukatsu-kiroku-v1';
-const THEME_KEY = 'syuukatsu-theme';
-const DEFAULT_TYPES = ['セミナー', 'ワークショップ', '説明会', 'オープンカンパニー', '本選考', 'インターン', '夏インターン', '冬インターン', 'OB・OG訪問', 'イベント'];
-const MARKS = ['ES通過', '参加決定'];
-const STATUS_LABEL = { ongoing: '進行中', upcoming: '予定', done: '振り返り' };
-const STEP_KINDS = {
-  'ES':                     { questions: true,  qTags: false, note: false },
-  '動画視聴':                { questions: false, qTags: false, note: true  },
-  '説明会':                  { questions: false, qTags: false, note: true  },
-  '面接':                    { questions: true,  qTags: true,  note: true  },
-  'グループディスカッション': { questions: false, qTags: false, note: true  },
-  '動画選考':                { questions: true,  qTags: false, note: true  },
-  'インターン':              { questions: false, qTags: false, note: true  },
-};
+const KEY = 'syukatsu-kiroku-v2';
+const OLD_KEY = 'syuukatsu-kiroku-v1';
+const THEME_KEY = 'syukatsu-theme';
+const COHORT = '29卒';
+const ACTIVITY_TYPES = ['インターン', '本選考', '説明会', 'セミナー', 'オープンカンパニー', 'イベント'];
+const SEASONS = ['サマー', 'オータム', 'ウィンター', '通年', '本選考'];
+const ACTIVITY_STATUS = ['未着手', '応募中', '結果待ち', '参加済み', '完了'];
+const STEP_PRESETS = ['ES', 'セミナー', '説明会', 'Webテスト', '適性検査', '動画選考', 'GD', '集団面接', '面接', '最終面接'];
+
+/* 種類→カード色トーン */
+const TYPE_TONE = { 'インターン': 'blue', '本選考': 'purple', '説明会': 'green', 'セミナー': 'green', 'オープンカンパニー': 'green', 'イベント': 'blue' };
+/* 活動状態→トーン */
+const STATUS_TONE = { '未着手': 'gray', '応募中': 'blue', '結果待ち': 'amber', '参加済み': 'green', '完了': 'green' };
 
 /* ============ ユーティリティ ============ */
 const $ = id => document.getElementById(id);
-const esc = s => (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = s => (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const pad2 = n => String(n).padStart(2, '0');
-
-/* ローカル時間ベースの日付文字列（toISOStringはUTCのため深夜0〜9時にズレる） */
 const ymd = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 const todayYMD = () => ymd(new Date());
-const fmtDate = ds => ds.replace(/-/g, '/');          // 2026-06-13 → 2026/06/13
-const fmtMD = ds => ds.slice(5).replace('-', '/');    // 2026-06-13 → 06/13
-
-/* inline onclick に名前を安全に埋め込む（'も%27にする） */
 const attrKey = s => encodeURIComponent(s).replace(/'/g, '%27');
-
-/* 種類ごとの色分け */
-function typeClass(t) {
-  t = t || '';
-  if (/OB|OG/i.test(t)) return 't-red';
-  if (/インターン|ワークショップ|イベント/.test(t)) return 't-blue';
-  if (/説明会|セミナー|オープンカンパニー/.test(t)) return 't-green';
-  if (/本選考/.test(t)) return 't-purple';
-  return 't-gray';
+const fmtJDate = ds => { if (!ds) return ''; const [y, m, d] = ds.split('-'); return `${y}年${Number(m)}月${Number(d)}日`; };
+function daysUntil(ds) { if (!ds) return null; return Math.round((new Date(ds + 'T00:00:00') - new Date(todayYMD() + 'T00:00:00')) / 86400000); }
+function relLabel(ds) {
+  const d = daysUntil(ds);
+  if (d == null) return '';
+  if (d < 0) return `${-d}日前`;
+  if (d === 0) return '今日';
+  if (d === 1) return '明日';
+  return `あと${d}日`;
 }
-
+function seasonOf(type, startDate) {
+  if (/夏|サマー/.test(type)) return 'サマー';
+  if (/冬|ウィンター/.test(type)) return 'ウィンター';
+  if (/本選考/.test(type)) return '本選考';
+  if (startDate) { const m = Number(startDate.slice(5, 7)); if (m >= 6 && m <= 9) return 'サマー'; if (m >= 10 && m <= 11) return 'オータム'; if (m === 12 || m <= 2) return 'ウィンター'; }
+  return '通年';
+}
+function normType(t) { // 夏インターン/冬インターン → インターン
+  if (/インターン/.test(t)) return 'インターン';
+  if (ACTIVITY_TYPES.includes(t)) return t;
+  return t;
+}
 function downloadFile(name, content, mime) {
   const blob = new Blob([content], { type: mime });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href);
 }
 
-/* ============ 状態・保存 ============ */
+/* ============ 状態・保存・移行 ============ */
 let state = load();
+if (state._needsSave) { delete state._needsSave; saveNow(); }
+
+function blankState() { return { companies: [], activities: [], schedules: [], _v: 2, _migrated: false }; }
 
 function load() {
-  let s = { entries: [], customTypes: [], companies: {} };
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) s = JSON.parse(raw);
-  } catch (e) { /* 壊れたデータは初期値で継続 */ }
-  return normalize(s);
+  let v2 = null;
+  try { v2 = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+  const hasData = v2 && (v2._migrated || (Array.isArray(v2.companies) && v2.companies.length) || (Array.isArray(v2.activities) && v2.activities.length));
+  if (hasData) return normalize(v2);
+  // v2 が空／無し → 旧 v1 からの移行を試みる（空v2の上書き競合にも強い）
+  const migrated = migrateFromV1();
+  if (migrated) { migrated._migrated = true; migrated._needsSave = true; return migrated; }
+  return blankState();
 }
 
-/* 旧バージョンのデータに足りないフィールドを補う */
 function normalize(s) {
-  s.entries = Array.isArray(s.entries) ? s.entries : [];
-  s.customTypes = Array.isArray(s.customTypes) ? s.customTypes : [];
-  s.companies = (s.companies && typeof s.companies === 'object') ? s.companies : {};
-  s.entries.forEach(e => {
-    e.subtitle ??= ''; e.startDate ??= ''; e.endDate ??= ''; e.time ??= ''; e.endTime ??= '';
-    e.locType ??= ''; e.locValue ??= ''; e.marks ??= [];
-    e.review ??= ''; e.hasFeedback ??= false; e.feedback ??= '';
-    e.steps = Array.isArray(e.steps) ? e.steps : [];
+  s.companies = Array.isArray(s.companies) ? s.companies : [];
+  s.activities = Array.isArray(s.activities) ? s.activities : [];
+  s.schedules = Array.isArray(s.schedules) ? s.schedules : [];
+  s.companies.forEach(c => {
+    c.links = Array.isArray(c.links) ? c.links : [];
+    c.mypage = c.mypage || { url: '', loginId: '', password: '', note: '' };
+    c.researchNote ??= ''; c.memo ??= '';
+    c.officialName ??= ''; c.industry ??= ''; c.subIndustry ??= '';
+    c.headquarters ??= ''; c.founded ??= ''; c.employees ??= ''; c.businessScale ??= ''; c.description ??= '';
+  });
+  s.activities.forEach(a => {
+    a.marks = Array.isArray(a.marks) ? a.marks : [];
+    a.steps = Array.isArray(a.steps) ? a.steps : [];
+    a.cohort ??= COHORT;
+    a.steps.forEach(st => {
+      st.esQuestions = Array.isArray(st.esQuestions) ? st.esQuestions : [];
+      st.record = st.record || { format: '', participants: '', theme: '', role: '', note: '', feedback: '', questions: [] };
+      st.record.questions = Array.isArray(st.record.questions) ? st.record.questions : [];
+    });
   });
   return s;
 }
 
-/* 即時保存：遅延なしでlocalStorageへ書き込む（モバイルで閉じてもデータが残る） */
-let indicatorTimer = null;
+/* 旧 v1（フラットな entries[]）→ 企業／活動／選考ステップに変換 */
+function migrateFromV1() {
+  let old;
+  try { old = JSON.parse(localStorage.getItem(OLD_KEY)); } catch (e) { return null; }
+  if (!old || !Array.isArray(old.entries) || !old.entries.length) return null;
+
+  const ns = blankState();
+  const oldCompanies = old.companies || {};
+  const companyByName = new Map();
+
+  const ensureCompany = name => {
+    const key = (name || '無名').trim();
+    if (companyByName.has(key)) return companyByName.get(key);
+    const cred = oldCompanies[key] || {};
+    const c = {
+      id: uid(), name: key, officialName: '', industry: '', subIndustry: '',
+      headquarters: '', founded: '', employees: '', businessScale: '', description: '',
+      links: [], researchNote: '', memo: '',
+      mypage: { url: cred.mypageUrl || '', loginId: cred.loginId || '', password: cred.password || '', note: '' },
+    };
+    ns.companies.push(c); companyByName.set(key, c);
+    return c;
+  };
+
+  const statusMap = { ongoing: '応募中', upcoming: '未着手', done: '参加済み' };
+
+  old.entries.forEach(e => {
+    const company = ensureCompany(e.name);
+    const type = normType(e.type || 'イベント');
+    const year = (e.startDate || e.createdAt || todayYMD()).slice(0, 4);
+    const act = {
+      id: e.id || uid(), companyId: company.id,
+      title: (e.subtitle && e.subtitle.trim()) || e.type || type,
+      type, cohort: COHORT, year, season: seasonOf(e.type || '', e.startDate),
+      status: statusMap[e.status] || '応募中',
+      marks: Array.isArray(e.marks) ? e.marks.slice() : [],
+      startDate: e.startDate || '', endDate: e.endDate || '', time: e.time || '', endTime: e.endTime || '',
+      locType: e.locType || '', locValue: e.locValue || '',
+      review: e.review || '', feedback: (e.hasFeedback ? e.feedback : '') || '',
+      steps: (e.steps || []).map(s => {
+        const label = s.kind || 'ステップ';
+        const step = {
+          id: s.id || uid(), label, status: s.done ? 'passed' : 'pending',
+          date: s.date || '', deadline: '', note: s.note || '',
+          esQuestions: [], record: { format: '', participants: '', theme: '', role: '', note: '', feedback: '', questions: [] },
+        };
+        const qs = s.questions || [];
+        if (label === 'ES') {
+          step.esQuestions = qs.map(q => ({ id: q.id || uid(), question: q.q || '', answer: q.a || '', limit: 400 }));
+        } else if (qs.length) {
+          step.record.questions = qs.map(q => ({ id: q.id || uid(), question: q.q || '', answer: q.a || '', tag: q.tag || '予測' }));
+          step.record.note = s.note || '';
+        }
+        return step;
+      }),
+    };
+    ns.activities.push(act);
+  });
+
+  // 旧キーはバックアップとして残す（削除しない）
+  try { localStorage.setItem(OLD_KEY + '-backup', localStorage.getItem(OLD_KEY)); } catch (e) {}
+  return ns;
+}
+
+let flashTimer = null;
+function saveNow() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
 function save() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    const el = $('saveStatus');
-    const t = new Date();
-    el.textContent = `✓ 保存済み ${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
-    el.classList.add('show');
-    clearTimeout(indicatorTimer);
-    indicatorTimer = setTimeout(() => el.classList.remove('show'), 2500);
-  } catch (err) {
-    alert('保存に失敗しました。プライベートブラウズモードでは保存できません。');
-  }
+  saveNow();
+  const el = $('saveFlash');
+  if (el) { el.classList.add('show'); clearTimeout(flashTimer); flashTimer = setTimeout(() => el.classList.remove('show'), 1600); }
 }
 
-/* ============ 表示ヘルパー ============ */
-function nextDateOf(entry) {
-  const today = todayYMD();
-  const dates = entry.steps.filter(s => s.date && s.date >= today).map(s => s.date);
-  if (entry.startDate && (entry.endDate || entry.startDate) >= today) {
-    dates.push(entry.startDate >= today ? entry.startDate : today);
-  }
-  return dates.sort()[0] || null;
+/* データ参照ヘルパー */
+const companyById = id => state.companies.find(c => c.id === id);
+const activityById = id => state.activities.find(a => a.id === id);
+const activitiesOf = cid => state.activities.filter(a => a.companyId === cid);
+const stepProgress = a => { const t = a.steps.length; const p = a.steps.filter(s => s.status === 'passed').length; return { passed: p, total: t, pct: t ? Math.round(p / t * 100) : 0 }; };
+function nextActionOf(a) {
+  const pend = a.steps.filter(s => s.status === 'pending' && s.date).sort((x, y) => x.date.localeCompare(y.date));
+  if (pend[0]) return { label: pend[0].label, date: pend[0].date };
+  const anyPend = a.steps.find(s => s.status === 'pending');
+  if (anyPend) return { label: anyPend.label, date: anyPend.date || '' };
+  if (a.startDate && daysUntil(a.startDate) >= 0) return { label: a.title, date: a.startDate };
+  return null;
 }
 
-function entryDateLabel(e) {
-  if (!e.startDate) return '';
-  if (e.endDate) return `${fmtMD(e.startDate)}〜${fmtMD(e.endDate)}`;
-  let t = e.time ? ' ' + e.time : '';
-  if (e.time && e.endTime) t += '〜' + e.endTime;
-  return fmtMD(e.startDate) + t;
+/* ============ ルーター ============ */
+let currentView = 'home';
+function setView(v) {
+  currentView = v;
+  document.querySelectorAll('#sideNav .nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  document.querySelectorAll('#bottomNav button[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  renderContent();
+  window.scrollTo(0, 0);
+}
+function renderContent() {
+  const c = $('content');
+  if (currentView === 'home') return renderHome(c);
+  if (currentView === 'stats') return renderStats(c);
+  return renderComing(c, currentView);
 }
 
-function locLabel(e) {
-  if (!e.locType) return '';
-  return e.locType === 'online' ? '🔗 オンライン' : '📍 対面';
+const COMING = {
+  self: ['◎', '自己分析', '原体験・強み・ガクチカなどの素材を整理し、ES・面接に再利用できます。次のアップデートで追加します。'],
+  interview: ['◫', '面接対策', '1次・2次・最終・企業別の質問ライブラリと、回答の版本管理。次のアップデートで追加します。'],
+  review: ['↺', '面接復盤', '事前の想定と実際の面接を並べて比較し、次の行動を決めます。次のアップデートで追加します。'],
+  calendar: ['□', 'カレンダー', '活動・締切・面接を月表示で管理します。次のアップデートで追加します。'],
+  settings: ['⋯', '設定', 'バックアップ（エクスポート／インポート）、テーマ、データ管理。次のアップデートで追加します。'],
+};
+function renderComing(c, view) {
+  const [icon, title, desc] = COMING[view] || ['◇', 'この機能', '準備中です。'];
+  c.innerHTML = `<div class="coming-panel"><div class="ci">${icon}</div><h2>${title}</h2><p>${esc(desc)}</p></div>`;
 }
 
-function urgencyLabel(e) {
-  if (e.status === 'done') return '';
-  const next = nextDateOf(e);
-  if (!next) return '';
-  const diff = Math.round((new Date(next + 'T00:00:00') - new Date(todayYMD() + 'T00:00:00')) / 86400000);
-  if (diff > 3) return '';
-  return diff <= 0 ? '⏰ 今日' : diff === 1 ? '⏰ 明日' : `⏰ あと${diff}日`;
+/* ============ ホーム ============ */
+let homeFilter = 'すべて';
+const HOME_FILTERS = ['すべて', '進行中', '締切間近', '結果待ち', '完了'];
+
+function isDone(a) { return a.status === '完了' || a.status === '参加済み'; }
+function activityUrgent(a) { // 48時間以内の予定/締切
+  const dates = [];
+  if (a.startDate) dates.push(a.startDate);
+  a.steps.forEach(s => { if (s.date) dates.push(s.date); if (s.deadline) dates.push(s.deadline); });
+  return dates.some(d => { const n = daysUntil(d); return n !== null && n >= 0 && n <= 2; });
 }
 
-const stepDateLabel = s => s.date ? fmtDate(s.date) + (s.time ? ' ' + s.time : '') : '日時未定';
+function renderHome(c) {
+  const now = new Date();
+  const wd = ['日', '月', '火', '水', '木', '金', '土'][now.getDay()];
+  const companies = state.companies.slice();
 
-/* ============ iOSカレンダー（.ics）書き出し ============ */
-const icsEscape = s => (s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+  // メトリクス
+  const acts = state.activities;
+  const ongoing = new Set(acts.filter(a => !isDone(a)).map(a => a.companyId)).size;
+  const weekEnd = ymd(new Date(Date.now() + 7 * 86400000));
+  const weekCount = allDatedItems().filter(it => it.date >= todayYMD() && it.date <= weekEnd).length;
+  const urgent = acts.filter(a => !isDone(a) && activityUrgent(a)).length;
+  const waiting = acts.filter(a => a.status === '結果待ち').length;
 
-function nextDayCompact(ds) {
-  const d = new Date(ds + 'T00:00:00');
-  d.setDate(d.getDate() + 1);
-  return ymd(d).replace(/-/g, '');
-}
-
-function addOneHour(t) {
-  const [h, m] = t.split(':').map(Number);
-  return `${pad2((h + 1) % 24)}:${pad2(m)}`;
-}
-
-function buildVEvent({ uid, date, endDate, time, endTime, summary, location, description }) {
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
-  const lines = ['BEGIN:VEVENT', 'UID:' + uid + '@syukatsukiroku', 'DTSTAMP:' + stamp];
-  const multiDay = endDate && endDate > date;
-  if (time && !multiDay) {
-    const d = date.replace(/-/g, '');
-    const et = endTime || addOneHour(time);
-    lines.push('DTSTART:' + d + 'T' + time.replace(':', '') + '00');
-    lines.push('DTEND:' + d + 'T' + et.replace(':', '') + '00');
-  } else {
-    lines.push('DTSTART;VALUE=DATE:' + date.replace(/-/g, ''));
-    lines.push('DTEND;VALUE=DATE:' + nextDayCompact(multiDay ? endDate : date));
-  }
-  lines.push('SUMMARY:' + icsEscape(summary));
-  if (location) lines.push('LOCATION:' + icsEscape(location));
-  if (description) lines.push('DESCRIPTION:' + icsEscape(description));
-  lines.push('END:VEVENT');
-  return lines;
-}
-
-function entryToICS(e) {
-  let events = [];
-  const label = e.type + (e.subtitle ? '・' + e.subtitle : '');
-  if (e.startDate) {
-    events = events.concat(buildVEvent({
-      uid: e.id, date: e.startDate, endDate: e.endDate, time: e.time, endTime: e.endTime,
-      summary: `${e.name}（${label}）`,
-      location: e.locType === 'online' ? 'オンライン' : (e.locValue || ''),
-      description: (e.locType === 'online' && e.locValue ? 'URL: ' + e.locValue : '') + (e.review ? '\n' + e.review : ''),
-    }));
-  }
-  e.steps.forEach(s => {
-    if (s.date) events = events.concat(buildVEvent({
-      uid: s.id, date: s.date, time: s.time,
-      summary: `${e.name} - ${s.kind}`, location: '', description: s.note || '',
-    }));
-  });
-  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//syukatsukiroku//JP', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].join('\r\n');
-}
-
-function exportEntryToCalendar(id) {
-  const e = state.entries.find(x => x.id === id); if (!e) return;
-  if (!e.startDate && !e.steps.some(s => s.date)) { alert('日程が登録されていません'); return; }
-  downloadFile(`${e.name}.ics`, entryToICS(e), 'text/calendar;charset=utf-8');
-}
-
-/* ============ 企業情報（マイページ・ID・パスワード） ============ */
-function companyInfoHTML(name) {
-  const c = state.companies[name] || {};
-  const url = c.mypageUrl || '';
-  return `<div style="margin-top:18px; padding:14px; border:1px solid var(--line); border-radius:10px">
-    <span class="mini-label">🔐 マイページ情報</span>
-    <div style="margin-bottom:8px">
-      <input type="text" class="cinfo" data-cfield="mypageUrl" placeholder="マイページURL" value="${esc(url)}">
-      ${/^https?:\/\//.test(url) ? `<a class="loc-link" href="${esc(url)}" target="_blank" rel="noopener">🔗 マイページを開く</a>` : ''}
-    </div>
-    <input type="text" class="cinfo" data-cfield="loginId" placeholder="ログインID・登録メール" value="${esc(c.loginId || '')}" style="margin-bottom:8px">
-    <div style="display:flex; gap:8px">
-      <input type="password" class="cinfo" id="cinfoPw" data-cfield="password" placeholder="パスワード" value="${esc(c.password || '')}">
-      <button class="btn btn-outline" style="white-space:nowrap" onclick="togglePw()">👁 表示</button>
-    </div>
-    <div style="font-size:11px; color:var(--sub); margin-top:8px">※この端末のブラウザにのみ保存されます。共用PCでは入力しないでください。</div>
-  </div>`;
-}
-
-function bindCompanyInfo(name) {
-  document.querySelectorAll('#detailModal .cinfo').forEach(el => {
-    el.addEventListener('input', () => {
-      state.companies[name] = state.companies[name] || {};
-      state.companies[name][el.dataset.cfield] = el.value;
-      save();
-    });
-  });
-}
-
-function togglePw() {
-  const pw = $('cinfoPw');
-  if (pw) pw.type = pw.type === 'password' ? 'text' : 'password';
-}
-
-/* ============ ホーム描画 ============ */
-let searchQuery = '';
-
-function singleCardHTML(e) {
-  const next = nextDateOf(e);
-  const doneSteps = e.steps.filter(s => s.done).length;
-  return `<div class="entry-card" onclick="openDetail('${e.id}')">
-    <div class="top">
-      <span class="entry-name">${esc(e.name)}</span>
-      <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end">
-        ${urgencyLabel(e) ? `<span class="urgent-badge">${urgencyLabel(e)}</span>` : ''}
-        ${(e.marks || []).map(m => `<span class="result-badge">✓ ${esc(m)}</span>`).join('')}
-        <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
-      </span>
-    </div>
-    ${e.subtitle ? `<div class="entry-sub">${esc(e.subtitle)}</div>` : ''}
-    <div class="entry-meta">
-      ${entryDateLabel(e) ? `<span>📅 ${entryDateLabel(e)}</span>` : ''}
-      ${locLabel(e) ? `<span>${locLabel(e)}</span>` : ''}
-      <span>📋 ステップ ${doneSteps}/${e.steps.length}件</span>
-      ${e.hasFeedback ? '<span>💬 FBあり</span>' : ''}
-      ${next ? `<span>⏰ 次回 ${fmtDate(next)}</span>` : ''}
-    </div>
-  </div>`;
-}
-
-function mergedCardHTML(name, es) {
-  const withNext = es.map(e => ({ u: urgencyLabel(e), d: nextDateOf(e) })).filter(x => x.d).sort((a, b) => a.d.localeCompare(b.d));
-  const next = withNext[0] ? withNext[0].d : null;
-  const urgent = withNext.find(x => x.u);
-  const marks = [...new Set(es.flatMap(e => e.marks || []))];
-  const total = es.reduce((n, e) => n + e.steps.length, 0);
-  const done = es.reduce((n, e) => n + e.steps.filter(s => s.done).length, 0);
-  return `<div class="entry-card" onclick="openCompany('${attrKey(name)}')">
-    <div class="top">
-      <span class="entry-name">${esc(name)}</span>
-      <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end">
-        ${urgent ? `<span class="urgent-badge">${urgent.u}</span>` : ''}
-        ${marks.map(m => `<span class="result-badge">✓ ${esc(m)}</span>`).join('')}
-        <span class="multi-badge">📁 ${es.length}件</span>
-      </span>
-    </div>
-    <div class="entry-meta" style="margin-top:8px">
-      ${es.map(e => `<span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>`).join('')}
-    </div>
-    <div class="entry-meta">
-      <span>📋 ステップ ${done}/${total}件</span>
-      ${next ? `<span>⏰ 次回 ${fmtDate(next)}</span>` : ''}
-    </div>
-  </div>`;
-}
-
-function renderHome() {
-  const q = searchQuery.toLowerCase();
-  const visible = q ? state.entries.filter(e => (e.name + ' ' + e.type + ' ' + (e.subtitle || '')).toLowerCase().includes(q)) : state.entries;
-  const groups = { ongoing: [], upcoming: [], done: [] };
-  visible.forEach(e => (groups[e.status] || groups.ongoing).push(e));
-
-  // 直近の予定が近い順（日程なしは後ろ）。振り返りは新しい日付順
-  const byNext = (a, b) => {
-    const da = nextDateOf(a), db = nextDateOf(b);
-    if (da && db) return da.localeCompare(db);
-    return da ? -1 : db ? 1 : 0;
-  };
-  groups.ongoing.sort(byNext);
-  groups.upcoming.sort(byNext);
-  groups.done.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
-
-  const render = (listId, countId, arr, emptyMsg) => {
-    $(countId).textContent = arr.length;
-    const list = $(listId);
-    if (!arr.length) {
-      list.innerHTML = `<div class="empty-hint">${q ? '該当する記録がありません' : emptyMsg}</div>`;
-      return;
-    }
-    // 同名の企業は1枚のカードにまとめる
-    const byName = new Map();
-    arr.forEach(e => {
-      const k = e.name.trim();
-      if (!byName.has(k)) byName.set(k, []);
-      byName.get(k).push(e);
-    });
-    list.innerHTML = [...byName.entries()].map(([name, es]) =>
-      es.length === 1 ? singleCardHTML(es[0]) : mergedCardHTML(name, es)).join('');
-  };
-
-  render('listOngoing', 'countOngoing', groups.ongoing, 'まだありません。右上の＋から追加しましょう');
-  render('listUpcoming', 'countUpcoming', groups.upcoming, '予定はありません');
-  render('listDone', 'countDone', groups.done, 'まだありません');
-  renderBanner();
-  renderStats();
-  renderCalendar();
-}
-
-/* ============ 今日・明日バナー ============ */
-function renderBanner() {
-  const banner = $('todayBanner');
+  // 今日のアクション
   const today = todayYMD();
   const tomorrow = ymd(new Date(Date.now() + 86400000));
-  const target = allEvents().filter(ev => ev.date === today || ev.date === tomorrow);
-  if (!target.length) { banner.innerHTML = ''; return; }
+  const actions = allDatedItems().filter(it => it.date === today || it.date === tomorrow)
+    .sort((a, b) => (a.date + (a.time || '99')).localeCompare(b.date + (b.time || '99'))).slice(0, 6);
 
-  banner.innerHTML = `<div class="today-banner">
-    <h4>🔔 直近の予定</h4>
-    ${target.map(ev => {
-      const isToday = ev.date === today;
-      return `<div class="banner-item" onclick="openDetail('${ev.entryId}')">
-        <span class="banner-when ${isToday ? 'today' : 'tomorrow'}">${isToday ? '今日' : '明日'}</span>
-        <div>
-          <div class="banner-name">${esc(ev.name)}</div>
-          <div class="banner-kind">${esc(ev.kind)}${ev.sub ? '・' + esc(ev.sub) : ''}</div>
+  // 進捗リング（今週の予定の完了率＝直近ステップの passed 比率）
+  const prog = weekProgress();
+
+  // 企業カード
+  let visible = companies.map(co => ({ co, act: primaryActivity(co.id) })).filter(x => x.act);
+  if (homeFilter === '締切間近') visible = visible.filter(x => activityUrgent(x.act));
+  else if (homeFilter === '結果待ち') visible = visible.filter(x => x.act.status === '結果待ち');
+  else if (homeFilter === '完了') visible = visible.filter(x => isDone(x.act));
+  else visible = visible.filter(x => homeFilter === 'すべて' || homeFilter === '進行中' ? !isDone(x.act) : true);
+
+  c.innerHTML = `
+    <section class="welcome-row">
+      <div>
+        <p class="eyebrow">${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${wd}曜日</p>
+        <h1>おはようございます<span>👋</span></h1>
+        <p>今日も一つずつ、落ち着いて進めましょう。</p>
+      </div>
+      <button class="primary-button desktop-add" id="homeAdd"><span>＋</span>新しい記録</button>
+    </section>
+
+    <section class="metric-grid" aria-label="就活の概要">
+      ${metricCard('進行中', ongoing, '社', 'indigo', `企業 ${state.companies.length}社を記録中`)}
+      ${metricCard('今週の予定', weekCount, '件', 'blue', actions[0] ? `次は ${actions[0].time || actions[0].date.slice(5).replace('-', '/')}` : '予定なし')}
+      ${metricCard('締切間近', urgent, '件', 'amber', '48時間以内')}
+      ${metricCard('結果待ち', waiting, '社', 'green', '結果を待っています')}
+    </section>
+
+    <div class="dashboard-grid">
+      <section class="panel action-panel">
+        <div class="panel-heading"><div><span class="section-kicker">NEXT ACTION</span><h2>直近のアクション</h2></div></div>
+        <div class="timeline">
+          ${actions.length ? actions.map(renderAction).join('') : `<p style="color:var(--sub);font-size:12px;padding:14px 0">今日・明日の予定はありません。</p>`}
         </div>
-        <span class="banner-time">${ev.isRange ? '期間中' : (ev.time || '')}</span>
-      </div>`;
-    }).join('')}
+      </section>
+      <section class="panel progress-panel">
+        <div class="panel-heading"><div><span class="section-kicker">THIS WEEK</span><h2>今週のペース</h2></div></div>
+        <div class="ring-wrap">
+          <div class="progress-ring" style="background:radial-gradient(circle closest-side,var(--surface) 76%,transparent 77%),conic-gradient(var(--primary) ${prog.pct}%,var(--line) 0)"><strong>${prog.pct}%</strong><span>完了</span></div>
+          <div class="ring-copy"><strong>${prog.pct >= 60 ? 'いいペースです' : 'ここから積み上げ'}</strong><p>ステップ全${prog.total}件のうち、${prog.passed}件が完了しました。</p></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="company-section">
+      <div class="company-heading"><div><span class="section-kicker">SELECTIONS</span><h2>選考中の企業</h2></div></div>
+      <div class="filter-row" role="tablist">
+        ${HOME_FILTERS.map(f => `<button class="filter-chip ${homeFilter === f ? 'active' : ''}" data-filter="${f}">${f}</button>`).join('')}
+      </div>
+      <div class="company-grid">
+        ${visible.length ? visible.map(x => companyCard(x.co, x.act)).join('')
+          : (state.companies.length ? `<div class="empty-state"><span>✓</span><strong>該当する記録はありません</strong><p>フィルターを変更して確認してください。</p></div>`
+            : `<div class="empty-companies"><strong>まだ記録がありません</strong><p>右上の「新しい記録」から、企業や活動を追加しましょう。</p><button id="emptyAdd">＋ 最初の記録を追加</button></div>`)}
+      </div>
+    </section>`;
+
+  $('homeAdd') && ($('homeAdd').onclick = openCreateCenter);
+  $('emptyAdd') && ($('emptyAdd').onclick = openCreateCenter);
+  c.querySelectorAll('.filter-chip').forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; renderHome(c); });
+  c.querySelectorAll('[data-company]').forEach(b => b.onclick = () => openCompany(b.dataset.company));
+  c.querySelectorAll('[data-openact]').forEach(b => b.onclick = e => { e.stopPropagation(); const a = activityById(b.dataset.openact); if (a) openCompany(a.companyId, a.id); });
+}
+
+function metricCard(label, value, suffix, tone, note) {
+  return `<article class="metric-card ${tone}"><div class="metric-top"><span>${label}</span><i></i></div><div class="metric-value">${value}<small>${suffix}</small></div><p>${esc(note)}</p></article>`;
+}
+function renderAction(it) {
+  const tone = it.kind === '締切' ? 'red' : it.tone || 'indigo';
+  const badge = it.date === todayYMD() ? '今日' : '明日';
+  return `<button class="action-item" data-openact="${it.activityId}"><span class="time-dot ${tone}"></span><time>${it.time || (it.date === todayYMD() ? '今日' : '明日')}</time><div><strong>${esc(it.company)}</strong><small>${esc(it.label)}</small></div><span class="action-badge ${tone}">${badge}</span><b>›</b></button>`;
+}
+function companyCard(co, a) {
+  const p = stepProgress(a);
+  const next = nextActionOf(a);
+  const statusCls = statusClass(a.status);
+  const dots = a.steps.slice(0, 6);
+  const passedCount = a.steps.filter(s => s.status === 'passed').length;
+  return `<button class="company-card" data-company="${co.id}">
+    <div class="company-top"><div><span class="type-tag type-${a.type}">${esc(a.type)}</span><h3>${esc(co.name)}</h3><p>${esc(a.title)}</p></div><span class="status-tag ${statusCls}">${esc(a.status)}</span></div>
+    <div class="next-box"><span>次のアクション</span><strong>${next ? esc(next.label) : '記録を進めましょう'}</strong><div><time>${next && next.date ? fmtJDate(next.date) : '日程未定'}</time><em>${next && next.date ? relLabel(next.date) : ''}</em></div></div>
+    <div class="card-progress"><div><span>選考の進捗</span><strong>${p.pct}%</strong></div><div class="progress-track"><i style="width:${p.pct}%"></i></div></div>
+    ${dots.length ? `<div class="step-dots">${dots.map((s, i) => `<div class="${s.status === 'passed' ? 'done' : (i === passedCount ? 'current' : '')}"><i>${s.status === 'passed' ? '✓' : i + 1}</i><span>${esc(s.label)}</span></div>`).join('')}</div>` : ''}
+  </button>`;
+}
+function statusClass(st) {
+  // reference uses status-締切間近/準備中/結果待ち/完了; map our statuses
+  if (st === '結果待ち') return 'status-結果待ち';
+  if (st === '完了' || st === '参加済み') return 'status-完了';
+  if (st === '応募中' || st === '未着手') return 'status-準備中';
+  return 'status-準備中';
+}
+
+/* 企業の代表活動（未完了で直近のもの、なければ最新） */
+function primaryActivity(cid) {
+  const list = activitiesOf(cid);
+  if (!list.length) return null;
+  const active = list.filter(a => !isDone(a));
+  const pool = active.length ? active : list;
+  return pool.slice().sort((a, b) => {
+    const na = nextActionOf(a), nb = nextActionOf(b);
+    const da = na && na.date ? na.date : '9999', db = nb && nb.date ? nb.date : '9999';
+    return da.localeCompare(db);
+  })[0];
+}
+/* 日付付きの全アイテム（活動開始・ステップ日・締切・予定） */
+function allDatedItems() {
+  const items = [];
+  state.activities.forEach(a => {
+    const co = companyById(a.companyId); const cname = co ? co.name : a.title;
+    if (a.startDate) items.push({ date: a.startDate, time: a.time || '', company: cname, label: `${a.type}・${a.title}`, activityId: a.id, kind: '活動', tone: TYPE_TONE[a.type] === 'blue' ? 'indigo' : (TYPE_TONE[a.type] || 'indigo') });
+    a.steps.forEach(s => {
+      if (s.date) items.push({ date: s.date, time: s.time || '', company: cname, label: s.label, activityId: a.id, kind: 'ステップ', tone: 'indigo' });
+      if (s.deadline) items.push({ date: s.deadline.slice(0, 10), time: '', company: cname, label: `${s.label} 締切`, activityId: a.id, kind: '締切', tone: 'red' });
+    });
+  });
+  state.schedules.forEach(s => { const a = activityById(s.activityId); const co = a && companyById(a.companyId); items.push({ date: s.date, time: s.time || '', company: co ? co.name : s.title, label: s.title, activityId: s.activityId || '', kind: '予定', tone: 'indigo' }); });
+  return items;
+}
+function weekProgress() {
+  let passed = 0, total = 0;
+  state.activities.filter(a => !isDone(a)).forEach(a => { a.steps.forEach(s => { total++; if (s.status === 'passed') passed++; }); });
+  return { passed, total, pct: total ? Math.round(passed / total * 100) : 0 };
+}
+
+/* ============ 統計（データ駆動） ============ */
+function renderStats(c) {
+  const acts = state.activities;
+  if (!acts.length) return renderComing(c, 'stats');
+  const interviews = acts.reduce((n, a) => n + a.steps.filter(s => /面接/.test(s.label) || s.label === 'GD' || s.label === '集団面接').length, 0);
+  // 漏斗
+  const funnelDefs = [['ES', /ES/], ['Webテスト', /Web|適性/], ['1次面接', /面接/], ['GD', /GD|集団/], ['最終面接', /最終/]];
+  const funnel = funnelDefs.map(([label, re]) => {
+    const steps = acts.flatMap(a => a.steps).filter(s => re.test(s.label));
+    const total = steps.length; const passed = steps.filter(s => s.status === 'passed').length;
+    return { label, total, passed };
+  }).filter(f => f.total > 0);
+  const passedSteps = acts.flatMap(a => a.steps).filter(s => s.status !== 'pending');
+  const passRate = passedSteps.length ? Math.round(passedSteps.filter(s => s.status === 'passed').length / passedSteps.length * 100) : 0;
+  const kettei = acts.filter(a => (a.marks || []).includes('参加決定') || a.status === '参加済み').length;
+  // 結果構成
+  const passingCo = new Set(acts.filter(a => a.steps.some(s => s.status === 'passed') && !a.steps.some(s => s.status === 'failed')).map(a => a.companyId)).size;
+  const failedCo = new Set(acts.filter(a => a.steps.some(s => s.status === 'failed')).map(a => a.companyId)).size;
+  const waitingCo = new Set(acts.filter(a => a.status === '結果待ち').map(a => a.companyId)).size;
+
+  c.innerHTML = `<div class="stats-page">
+    <section class="stats-heading"><div><span class="section-kicker">ANALYTICS</span><h1>就活の統計</h1><p>記録した選考を、次の行動につながる形で確認します。</p></div></section>
+    <section class="stats-metrics">
+      <article><span>登録企業</span><strong>${state.companies.length}<small>社</small></strong><em>活動 ${acts.length}件</em></article>
+      <article><span>面接・GD</span><strong>${interviews}<small>回</small></strong><em>記録済み</em></article>
+      <article><span>選考通過率</span><strong>${passRate}<small>%</small></strong><em>判明したステップ</em></article>
+      <article><span>参加・内定</span><strong>${kettei}<small>件</small></strong><em>参加決定など</em></article>
+    </section>
+    <div class="stats-grid">
+      <section class="stats-card funnel-card"><header><div><span class="section-kicker">SELECTION FUNNEL</span><h2>段階別の通過状況</h2></div></header>
+        <div class="funnel-list">${funnel.length ? funnel.map(f => `<div><div><strong>${f.label}</strong><span>${f.passed} / ${f.total}件</span><em>${Math.round(f.passed / f.total * 100)}%</em></div><i><b style="width:${Math.round(f.passed / f.total * 100)}%"></b></i></div>`).join('') : `<p style="color:var(--sub);font-size:11px">ステップを記録すると集計されます。</p>`}</div>
+      </section>
+      <section class="stats-card outcome-card"><header><div><span class="section-kicker">RESULTS</span><h2>現在の選考結果</h2></div></header>
+        <div class="donut"><div><strong>${state.companies.length}</strong><span>企業</span></div></div>
+        <ul><li><i class="green"></i><span>通過・進行中</span><strong>${passingCo}社</strong></li><li><i class="red"></i><span>落選</span><strong>${failedCo}社</strong></li><li><i class="gray"></i><span>結果待ち</span><strong>${waitingCo}社</strong></li></ul>
+      </section>
+    </div>
   </div>`;
 }
 
-/* ============ 統計 ============ */
-function renderStats() {
-  const area = $('statsArea');
-  const entries = state.entries;
-  if (!entries.length) {
-    area.innerHTML = '<div class="empty-hint">記録が増えると、ここに統計が表示されます</div>';
-    return;
-  }
+/* ============ 企業ワークスペース ============ */
+let wsCompanyId = null, wsTab = 'selection', wsActivityId = null, wsPwVisible = false;
 
-  const byType = {};
-  const stepStats = {};
-  let esPass = 0, kettei = 0, stepsTotal = 0, stepsDone = 0;
-  entries.forEach(e => {
-    byType[e.type] = (byType[e.type] || 0) + 1;
-    if ((e.marks || []).includes('ES通過')) esPass++;
-    if ((e.marks || []).includes('参加決定')) kettei++;
-    e.steps.forEach(s => {
-      stepsTotal++;
-      if (s.done) stepsDone++;
-      stepStats[s.kind] = stepStats[s.kind] || { total: 0, done: 0 };
-      stepStats[s.kind].total++;
-      if (s.done) stepStats[s.kind].done++;
-    });
-  });
-  const progress = stepsTotal ? Math.round(stepsDone / stepsTotal * 100) : 0;
+function openCompany(cid, activityId = null) {
+  wsCompanyId = cid; wsTab = 'selection'; wsActivityId = activityId; wsPwVisible = false;
+  renderWorkspace();
+}
+function closeWorkspace() { wsCompanyId = null; wsActivityId = null; $('overlayRoot').innerHTML = ''; renderContent(); }
 
-  const cards = `
-    <div class="stats-grid">
-      <div class="stat-card"><div class="stat-num">${entries.length}</div><div class="stat-label">全エントリー</div></div>
-      <div class="stat-card"><div class="stat-num green">${esPass}</div><div class="stat-label">ES通過</div></div>
-      <div class="stat-card"><div class="stat-num green">${kettei}</div><div class="stat-label">参加決定</div></div>
-      <div class="stat-card"><div class="stat-num orange">${progress}%</div><div class="stat-label">ステップ完了率<br>（${stepsDone}/${stepsTotal}）</div></div>
-    </div>`;
+function renderWorkspace() {
+  const co = companyById(wsCompanyId);
+  if (!co) return closeWorkspace();
+  if (wsActivityId) return renderFlow();
+  const acts = activitiesOf(co.id);
+  const byYear = {};
+  acts.forEach(a => { (byYear[a.year] = byYear[a.year] || []).push(a); });
+  const years = Object.keys(byYear).sort((a, b) => b.localeCompare(a));
+  const logo = (co.name || '？').slice(0, 2);
 
-  const typeRows = Object.entries(byType).sort((a, b) => b[1] - a[1]);
-  const typeMax = typeRows[0][1];
-  const typePanel = `
-    <div class="stats-panel">
-      <h3>種類別の内訳</h3>
-      ${typeRows.map(([t, n]) => `
-        <div class="bar-row">
-          <span class="bar-label">${esc(t)}</span>
-          <div class="bar-track"><div class="bar-fill" style="width:${n / typeMax * 100}%"></div></div>
-          <span class="bar-count">${n}件</span>
-        </div>`).join('')}
-    </div>`;
+  $('overlayRoot').innerHTML = `<div class="company-workspace">
+    <header class="company-page-header">
+      <button class="company-back" id="wsBack"><span>‹</span>企業一覧に戻る</button>
+      <div class="company-page-tabs" role="tablist">
+        <button class="${wsTab === 'selection' ? 'active' : ''}" data-tab="selection">選考管理</button>
+        <button class="${wsTab === 'research' ? 'active' : ''}" data-tab="research">企業研究</button>
+      </div>
+      <button class="company-save" id="wsAddAct">＋ 活動</button>
+    </header>
+    <main class="company-page-main">
+      <section class="company-hero">
+        <div class="company-logo">${esc(logo)}</div>
+        <div class="company-identity">
+          <div class="company-tags"><span>${COHORT}</span>${co.industry ? `<span>${esc(co.industry)}</span>` : ''}</div>
+          <h1>${esc(co.name)}${co.officialName ? `<small>${esc(co.officialName)}</small>` : ''}</h1>
+          ${(co.industry || co.subIndustry) ? `<div class="industry-path"><strong>${esc(co.industry || '未分類')}</strong><span>›</span><strong>${esc(co.subIndustry || '—')}</strong></div>` : ''}
+          ${co.description ? `<p>${esc(co.description)}</p>` : ''}
+        </div>
+        <div class="hero-actions">${co.mypage.url ? `<a href="${esc(co.mypage.url)}" target="_blank" rel="noreferrer">マイページ ↗</a>` : ''}<button id="wsEditProfile">企業情報を編集</button></div>
+      </section>
+      ${wsTab === 'selection' ? selectionTabHTML(co, years, byYear) : researchTabHTML(co)}
+    </main>
+  </div>`;
 
-  const stepRows = Object.entries(stepStats).sort((a, b) => b[1].total - a[1].total);
-  let stepPanel = '';
-  if (stepRows.length) {
-    const stepMax = stepRows[0][1].total;
-    stepPanel = `
-      <div class="stats-panel">
-        <h3>ステップ別の件数 <span style="font-weight:400">（<span style="color:var(--green)">■</span> 完了分）</span></h3>
-        ${stepRows.map(([k, st]) => `
-          <div class="bar-row">
-            <span class="bar-label">${esc(k)}</span>
-            <div class="bar-track">
-              <div class="bar-fill" style="width:${st.total / stepMax * 100}%"></div>
-              <div class="bar-fill done-part" style="width:${st.done / stepMax * 100}%"></div>
-            </div>
-            <span class="bar-count">${st.done}/${st.total}件</span>
-          </div>`).join('')}
-      </div>`;
-  }
-
-  area.innerHTML = cards + typePanel + stepPanel;
+  $('wsBack').onclick = closeWorkspace;
+  $('overlayRoot').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { wsTab = b.dataset.tab; renderWorkspace(); });
+  $('wsAddAct').onclick = () => openActivityAdd(co.id);
+  $('wsEditProfile').onclick = () => openProfileEditor(co.id);
+  if (wsTab === 'selection') bindSelectionTab(co);
+  if (wsTab === 'research') bindResearchTab(co);
 }
 
-/* ============ 新規追加 ============ */
-let selectedType = null;
-let selectedLoc = '';
+function selectionTabHTML(co, years, byYear) {
+  return `<div class="company-page-grid">
+    <div class="company-primary-column">
+      <section class="workspace-panel activities-panel">
+        <div class="workspace-title"><div><span>ACTIVITIES</span><h2>活動・選考記録</h2></div><button data-act="add">＋ 活動を追加</button></div>
+        ${years.length ? years.map(y => `
+          <div class="year-group">
+            <div class="year-heading"><strong>${esc(y)}年</strong><span>${COHORT}</span></div>
+            <div class="activity-list">${byYear[y].map(activityRow).join('')}</div>
+          </div>`).join('') : `<div class="empty-record" style="margin-top:16px"><i>＋</i><strong>活動がありません</strong><p>インターン・本選考・説明会などを追加しましょう。</p><button data-act="add">最初の活動を追加</button></div>`}
+      </section>
+    </div>
+    <aside class="company-side-column">
+      <section class="workspace-panel mypage-card">
+        <div class="workspace-title compact"><div><span>MY PAGE</span><h2>マイページ情報</h2></div><button data-my="edit">編集</button></div>
+        <a class="mypage-link" href="${esc(co.mypage.url || '#')}" ${co.mypage.url ? 'target="_blank" rel="noreferrer"' : ''}>企業マイページを開く <span>↗</span></a>
+        <label>ログインID<div><code>${esc(co.mypage.loginId || '未登録')}</code><button data-my="copyId">コピー</button></div></label>
+        <label>パスワード<div><code class="${wsPwVisible ? '' : 'pw-dots'}">${wsPwVisible ? esc(co.mypage.password || '未登録') : '••••••••••••'}</code><span class="mypage-inline-actions"><button data-my="togglePw">${wsPwVisible ? '隠す' : '表示'}</button><button data-my="copyPw">コピー</button></span></div></label>
+        ${co.mypage.note ? `<p class="mypage-note">${esc(co.mypage.note)}</p>` : ''}
+        <p class="security-note">この情報は端末内だけに保存されます。共用PCでは保存しないでください。</p>
+      </section>
+      <section class="workspace-panel quick-memo"><div class="workspace-title compact"><div><span>MEMO</span><h2>企業メモ</h2></div></div><textarea data-memo placeholder="説明会で聞いた内容や、次に確認したいこと。">${esc(co.memo)}</textarea></section>
+    </aside>
+  </div>`;
+}
+function activityRow(a) {
+  const p = stepProgress(a);
+  const tone = STATUS_TONE[a.status] || 'gray';
+  const dateLabel = a.startDate ? (a.endDate ? `${fmtJDate(a.startDate)}〜` : fmtJDate(a.startDate)) : '日程未定';
+  return `<button class="activity-row" data-openact="${a.id}">
+    <span class="activity-date ${tone}">${esc(a.season)}</span>
+    <div class="activity-copy"><div><h3>${esc(a.title)}</h3><span>${esc(a.type)}</span></div><p>${dateLabel}</p>
+      <div class="activity-progress"><i style="width:${p.pct}%"></i></div>
+      ${a.marks && a.marks.length ? `<div class="activity-marks">${a.marks.map(m => `<span>✓ ${esc(m)}</span>`).join('')}</div>` : ''}
+    </div>
+    <span class="activity-status ${tone}">${esc(a.status)}</span><b>›</b>
+  </button>`;
+}
+function bindSelectionTab(co) {
+  const root = $('overlayRoot');
+  root.querySelectorAll('[data-openact]').forEach(b => b.onclick = () => { wsActivityId = b.dataset.openact; renderWorkspace(); });
+  root.querySelectorAll('[data-act="add"]').forEach(b => b.onclick = () => openActivityAdd(co.id));
+  const my = k => root.querySelector(`[data-my="${k}"]`);
+  my('edit') && (my('edit').onclick = () => openMypageEditor(co.id));
+  my('togglePw') && (my('togglePw').onclick = () => { wsPwVisible = !wsPwVisible; renderWorkspace(); });
+  my('copyId') && (my('copyId').onclick = () => copyText(co.mypage.loginId));
+  my('copyPw') && (my('copyPw').onclick = () => copyText(co.mypage.password));
+  const memo = root.querySelector('[data-memo]');
+  memo && memo.addEventListener('input', () => { co.memo = memo.value; save(); });
+}
+function copyText(t) { if (!t) return; navigator.clipboard && navigator.clipboard.writeText(t).then(() => flash('コピーしました')).catch(() => {}); }
 
-function renderTypeOptions() {
-  const wrap = $('typeOptions');
-  const types = [...DEFAULT_TYPES, ...state.customTypes];
-  wrap.innerHTML = types.map(t =>
-    `<button class="type-chip ${selectedType === t ? 'selected' : ''}" data-type="${esc(t)}"><span class="chip-dot ${typeClass(t)}"></span>${esc(t)}</button>`
-  ).join('') + `<button class="type-chip ${selectedType === '__custom__' ? 'selected' : ''}" data-type="__custom__">＋ 自分で追加</button>`;
-  wrap.querySelectorAll('.type-chip').forEach(btn => {
-    btn.onclick = () => {
-      selectedType = btn.dataset.type;
-      $('customTypeField').style.display = selectedType === '__custom__' ? '' : 'none';
-      renderTypeOptions();
-    };
-  });
+function researchTabHTML(co) {
+  return `<div class="research-layout">
+    <div class="research-grid">
+      <div class="research-main">
+        <section class="workspace-panel research-section"><div class="workspace-title"><div><span>OVERVIEW</span><h2>企業概要</h2></div></div>
+          <p>${esc(co.description || 'まだ企業概要が入力されていません。「企業情報を編集」から追加できます。')}</p></section>
+        <section class="workspace-panel research-section"><div class="workspace-title"><div><span>YOUR NOTE</span><h2>自分の企業研究メモ</h2></div></div>
+          <textarea class="research-note" data-research placeholder="事業内容、面接で使いたい切り口、志望動機の素材などを記録。">${esc(co.researchNote)}</textarea></section>
+      </div>
+      <aside class="research-side">
+        <section class="workspace-panel fact-sheet"><div class="workspace-title compact"><div><span>BASIC DATA</span><h2>基本情報</h2></div></div>
+          <dl>
+            <div><dt>業界</dt><dd>${esc(co.industry || '—')}</dd></div>
+            <div><dt>本社</dt><dd>${esc(co.headquarters || '—')}</dd></div>
+            <div><dt>創立</dt><dd>${esc(co.founded || '—')}</dd></div>
+            <div><dt>従業員数</dt><dd>${esc(co.employees || '—')}</dd></div>
+          </dl></section>
+      </aside>
+    </div>
+  </div>`;
+}
+function bindResearchTab(co) {
+  const ta = $('overlayRoot').querySelector('[data-research]');
+  ta && ta.addEventListener('input', () => { co.researchNote = ta.value; save(); });
 }
 
-function updateLocUI() {
-  document.querySelectorAll('#locOptions .type-chip').forEach(b =>
-    b.classList.toggle('selected', b.dataset.loc === selectedLoc));
-  $('locValueWrap').style.display = selectedLoc ? '' : 'none';
-  $('addLocValue').placeholder =
-    selectedLoc === 'online' ? 'URLを貼り付け（Zoom・Teamsなど）' : '住所・会場名を貼り付け';
+/* ============ 選考フローページ ============ */
+let flowStepId = null;
+
+function renderFlow() {
+  const co = companyById(wsCompanyId); const a = activityById(wsActivityId);
+  if (!a) { wsActivityId = null; return renderWorkspace(); }
+  if (!flowStepId || !a.steps.some(s => s.id === flowStepId)) flowStepId = a.steps[0] ? a.steps[0].id : null;
+  const p = stepProgress(a);
+  const failed = a.steps.some(s => s.status === 'failed');
+  const selected = a.steps.find(s => s.id === flowStepId);
+
+  $('overlayRoot').innerHTML = `<div class="company-workspace"><main class="company-page-main">
+    <button class="flow-back" id="flowBack"><span>‹</span>${esc(co.name)} の活動に戻る</button>
+    <section class="flow-event-header workspace-panel">
+      <div class="flow-event-icon">${esc(a.season.slice(0, 2))}</div>
+      <div><div class="flow-event-tags"><span>${COHORT}</span><span>${esc(a.type)}</span><span>${esc(a.year)}年</span><span class="saved-tag">✓ 自動保存</span></div><h2>${esc(a.title)}</h2><p>${esc(co.name)}</p></div>
+      <div class="flow-summary"><span>進捗</span><strong>${p.passed}<small> / ${a.steps.length}</small></strong><em class="${failed ? 'failed' : 'active'}">${failed ? '選考終了' : '選考中'}</em></div>
+    </section>
+
+    <section class="workspace-panel flow-map-panel">
+      <div class="workspace-title"><div><span>SELECTION FLOW</span><h2>選考プロセス</h2></div><div class="flow-toolbar"><button id="flowEdit">＋ フローを編集</button><div class="flow-legend"><span><i class="passed"></i>通過</span><span><i class="failed"></i>落選</span><span><i class="pending"></i>未定</span></div></div></div>
+      <div class="flow-scroll"><div class="flow-nodes">${a.steps.map((s, i) => `<div class="flow-node-wrap"><button class="flow-node ${s.status} ${flowStepId === s.id ? 'selected' : ''}" data-node="${s.id}"><i>${s.status === 'passed' ? '✓' : s.status === 'failed' ? '×' : i + 1}</i><strong>${esc(s.label)}</strong><small>${s.status === 'passed' ? '通過' : s.status === 'failed' ? '落選' : '未定'}</small></button>${i < a.steps.length - 1 ? `<span class="flow-connector ${s.status}"><i>›</i></span>` : ''}</div>`).join('') || '<p style="color:var(--sub);font-size:11px">ステップがありません。「フローを編集」から追加してください。</p>'}</div></div>
+      <p class="flow-hint">各ステップをクリックすると、詳細の確認・編集ができます。</p>
+    </section>
+
+    ${selected ? stepDetailHTML(a, selected) : ''}
+  </main></div>`;
+
+  $('flowBack').onclick = () => { wsActivityId = null; flowStepId = null; renderWorkspace(); };
+  $('flowEdit').onclick = () => openFlowEditor(a.id);
+  $('overlayRoot').querySelectorAll('[data-node]').forEach(b => b.onclick = () => { flowStepId = b.dataset.node; renderFlow(); });
+  if (selected) bindStepDetail(a, selected);
 }
 
-function openAddModal() {
-  selectedType = null;
-  selectedLoc = '';
-  $('addName').value = '';
-  $('addSubtitle').value = '';
-  $('customTypeInput').value = '';
-  $('addStatus').value = 'ongoing';
-  $('customTypeField').style.display = 'none';
-  const today = todayYMD();
-  $('addStartDate').value = today;
-  $('addEndDate').value = today;
-  $('addTime').value = '';
-  $('addEndTime').value = '';
-  $('addLocValue').value = '';
-  updateLocUI();
-  renderTypeOptions();
-  $('nameSuggest').style.display = 'none';
-  $('addOverlay').classList.add('open');
-  $('addName').focus();
+function stepDetailHTML(a, s) {
+  return `<section class="workspace-panel step-detail-panel">
+    <div class="step-detail-head"><div><span>STEP DETAIL</span><h2>${esc(s.label)}</h2><p>${s.date ? fmtJDate(s.date) : '日程未定'}</p></div>
+      <div class="status-picker"><span>結果</span><div>
+        <button class="passed ${s.status === 'passed' ? 'active' : ''}" data-status="passed">✓ 通過</button>
+        <button class="failed ${s.status === 'failed' ? 'active' : ''}" data-status="failed">× 落選</button>
+        <button class="pending ${s.status === 'pending' ? 'active' : ''}" data-status="pending">－ 未定</button>
+      </div></div>
+    </div>
+    <div class="step-detail-grid">
+      <div class="step-main-detail">${stepBodyHTML(s)}</div>
+      <aside class="step-side-detail">
+        <div><span>日程</span><strong>${s.date ? fmtJDate(s.date) : '日程未定'}</strong></div>
+        ${s.deadline ? `<div class="deadline-box"><span>締切</span><strong>${esc(s.deadline)}</strong><em>${s.status === 'passed' ? '完了' : '要確認'}</em></div>` : ''}
+        <div><span>メモ</span><p>${esc(s.note || 'メモは未記入です。')}</p></div>
+        <button data-stepedit>このステップを編集</button>
+      </aside>
+    </div>
+  </section>`;
+}
+function stepBodyHTML(s) {
+  const L = s.label;
+  if (L === 'ES') return esDetailHTML(s);
+  if (L === 'GD' || L === 'グループディスカッション') return gdDetailHTML(s);
+  if (/面接/.test(L) || L === '集団面接') return interviewDetailHTML(s);
+  return genericDetailHTML(s);
+}
+function esDetailHTML(s) {
+  return `<div class="es-detail"><div class="detail-section-title"><div><span>QUESTIONS</span><h3>ES設問・回答</h3></div><button data-esadd>＋ 設問を追加</button></div>
+    ${s.esQuestions.map((q, i) => `<article><div><span>設問 ${pad2(i + 1)}</span><em>${q.limit}字以内</em></div><h4>${esc(q.question || '設問を入力してください')}</h4><p>${esc(q.answer || '回答はまだ入力されていません。')}</p><footer><span class="${q.answer.length > q.limit ? 'over-limit' : ''}">${q.answer.length} / ${q.limit}字</span><span class="es-card-actions"><button data-esedit="${q.id}">回答を編集</button><button data-esdel="${q.id}">削除</button></span></footer></article>`).join('')}
+    ${s.esQuestions.length === 0 ? `<div class="empty-record"><i>＋</i><strong>ES設問がありません</strong><p>企業から提示された設問と回答を追加してください。</p><button data-esadd>最初の設問を追加</button></div>` : ''}
+  </div>`;
+}
+function gdDetailHTML(s) {
+  const r = s.record;
+  return `<div class="stage-record"><div class="detail-section-title"><div><span>GROUP DISCUSSION</span><h3>GD記録</h3></div><span class="auto-save-mini">✓ 自動保存</span></div>
+    <div class="record-grid"><label>実施形式<input data-rec="format" value="${esc(r.format)}" placeholder="オンライン／対面"></label><label>参加人数<input data-rec="participants" value="${esc(r.participants)}"></label></div>
+    <label>GDテーマ<textarea data-rec="theme" placeholder="提示されたテーマ">${esc(r.theme)}</textarea></label>
+    <label>自分の役割<input data-rec="role" value="${esc(r.role)}" placeholder="司会、タイムキーパーなど"></label>
+    <label>議論内容・振り返り<textarea data-rec="note">${esc(r.note)}</textarea></label>
+    <label>企業からのフィードバック<textarea data-rec="feedback">${esc(r.feedback)}</textarea></label></div>`;
+}
+function interviewDetailHTML(s) {
+  const r = s.record;
+  return `<div class="stage-record interview-record"><div class="detail-section-title"><div><span>INTERVIEW</span><h3>${esc(s.label)}記録</h3></div><button data-iqadd>＋ 質問を追加</button></div>
+    <div class="record-grid"><label>実施形式<input data-rec="format" value="${esc(r.format)}" placeholder="オンライン／対面"></label><label>面接官・参加人数<input data-rec="participants" value="${esc(r.participants)}"></label></div>
+    <div class="interview-questions">${r.questions.map((q, i) => `<article><header><span>質問 ${pad2(i + 1)}</span><select data-iq="${q.id}" data-iqf="tag"><option ${q.tag !== '本番' ? 'selected' : ''}>予測</option><option ${q.tag === '本番' ? 'selected' : ''}>本番</option></select><button data-iqdel="${q.id}">削除</button></header><input data-iq="${q.id}" data-iqf="question" value="${esc(q.question)}" placeholder="質問内容"><textarea data-iq="${q.id}" data-iqf="answer" placeholder="自分の回答・改善点">${esc(q.answer)}</textarea></article>`).join('')}</div>
+    ${r.questions.length === 0 ? `<button class="empty-question-add" data-iqadd>＋ 最初の質問を追加</button>` : ''}
+    <label>全体メモ<textarea data-rec="note" placeholder="面接官の反応、雰囲気、改善点">${esc(r.note)}</textarea></label>
+    <label>フィードバック<textarea data-rec="feedback">${esc(r.feedback)}</textarea></label></div>`;
+}
+function genericDetailHTML(s) {
+  return `<div class="generic-detail"><div class="detail-section-title"><div><span>NOTE</span><h3>${esc(s.label)}のメモ</h3></div></div>
+    <label class="mini-label" style="display:block;color:var(--sub);font-size:8px;font-weight:750;margin-top:13px">記録・メモ</label>
+    <textarea data-rec="note" style="width:100%;min-height:120px;margin-top:5px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--text);font-size:9px;line-height:1.7;outline:0;resize:vertical" placeholder="日程、内容、感想などを記録できます。">${esc(s.note)}</textarea></div>`;
+}
+function bindStepDetail(a, s) {
+  const root = $('overlayRoot');
+  root.querySelectorAll('[data-status]').forEach(b => b.onclick = () => { s.status = b.dataset.status; save(); renderFlow(); });
+  root.querySelector('[data-stepedit]') && (root.querySelector('[data-stepedit]').onclick = () => openStepEditor(a.id, s.id));
+  // generic/GD/interview record fields (note lives on step for generic)
+  root.querySelectorAll('[data-rec]').forEach(el => el.addEventListener('input', () => {
+    const f = el.dataset.rec;
+    if (s.label !== 'ES' && s.label !== 'GD' && s.label !== 'グループディスカッション' && !/面接/.test(s.label) && s.label !== '集団面接' && f === 'note') { s.note = el.value; }
+    else { s.record[f] = el.value; }
+    save();
+  }));
+  // ES
+  root.querySelectorAll('[data-esadd]').forEach(b => b.onclick = () => openESEditor(a.id, s.id, null));
+  root.querySelectorAll('[data-esedit]').forEach(b => b.onclick = () => openESEditor(a.id, s.id, b.dataset.esedit));
+  root.querySelectorAll('[data-esdel]').forEach(b => b.onclick = () => { s.esQuestions = s.esQuestions.filter(q => q.id !== b.dataset.esdel); save(); renderFlow(); });
+  // interview questions
+  root.querySelectorAll('[data-iqadd]').forEach(b => b.onclick = () => { s.record.questions.push({ id: uid(), question: '', answer: '', tag: '予測' }); save(); renderFlow(); });
+  root.querySelectorAll('[data-iqdel]').forEach(b => b.onclick = () => { s.record.questions = s.record.questions.filter(q => q.id !== b.dataset.iqdel); save(); renderFlow(); });
+  root.querySelectorAll('[data-iq]').forEach(el => el.addEventListener('input', () => { const q = s.record.questions.find(x => x.id === el.dataset.iq); if (q) { q[el.dataset.iqf] = el.value; save(); } }));
 }
 
-function renderNameSuggest() {
-  const box = $('nameSuggest');
-  const v = $('addName').value.trim();
-  if (v.length < 2) { box.style.display = 'none'; return; }
-  const names = [...new Set(state.entries.map(e => e.name.trim()))]
-    .filter(n => n !== v && n.toLowerCase().includes(v.toLowerCase()))
-    .slice(0, 5);
-  if (!names.length) { box.style.display = 'none'; return; }
-  box.innerHTML = names.map(n => {
-    const cnt = state.entries.filter(e => e.name.trim() === n).length;
-    return `<div class="suggest-item" data-name="${esc(n)}"><span>${esc(n)}</span><span class="cnt">${cnt}件の記録あり</span></div>`;
-  }).join('');
-  box.style.display = '';
-  box.querySelectorAll('.suggest-item').forEach(it => {
-    it.addEventListener('mousedown', ev => {
-      ev.preventDefault();
-      $('addName').value = it.dataset.name;
-      box.style.display = 'none';
-    });
-  });
+/* ============ モーダル基盤 ============ */
+function openModal(html) {
+  const wrap = document.createElement('div');
+  wrap.className = 'overlay center';
+  wrap.innerHTML = html;
+  wrap.addEventListener('mousedown', e => { if (e.target === wrap) wrap.remove(); });
+  document.body.appendChild(wrap);
+  return wrap;
 }
+function flash(msg) { const el = $('saveFlash'); if (!el) return; el.textContent = '✓ ' + msg; el.classList.add('show'); clearTimeout(flashTimer); flashTimer = setTimeout(() => { el.classList.remove('show'); el.textContent = '✓ 保存しました'; }, 1600); }
 
-function saveNewEntry() {
-  const name = $('addName').value.trim();
-  if (!name) { alert('会社名・タイトルを入力してください'); return; }
-  let type = selectedType;
-  if (!type) { alert('種類を選んでください'); return; }
-  if (type === '__custom__') {
-    type = $('customTypeInput').value.trim();
-    if (!type) { alert('カスタム種類名を入力してください'); return; }
-    if (!state.customTypes.includes(type) && !DEFAULT_TYPES.includes(type)) state.customTypes.push(type);
-  }
-  const startDate = $('addStartDate').value;
-  let endDate = $('addEndDate').value;
-  if (!startDate || (endDate && endDate <= startDate)) endDate = '';
-  const entry = {
-    id: uid(), name, type,
-    subtitle: $('addSubtitle').value.trim(),
-    status: $('addStatus').value,
-    startDate, endDate,
-    time: startDate ? $('addTime').value : '',
-    endTime: startDate ? $('addEndTime').value : '',
-    locType: selectedLoc,
-    locValue: selectedLoc ? $('addLocValue').value.trim() : '',
-    marks: [], review: '', hasFeedback: false, feedback: '',
-    createdAt: new Date().toISOString(),
-    steps: [],
+/* ---- 作成センター ---- */
+const CREATE_KINDS = [
+  { id: 'company', icon: '⌂', label: '企業を追加', note: '企業情報から開始' },
+  { id: 'activity', icon: '→', label: '活動・選考', note: 'インターン、本選考、説明会' },
+  { id: 'schedule', icon: '□', label: '予定・締切', note: '面接日、ES締切、テスト' },
+];
+function openCreateCenter() {
+  let kind = 'activity';
+  const w = openModal(`<div class="create-center"><header><div><span>CREATE CENTER</span><h2>何を追加しますか？</h2><p>まず目的を選び、必要な項目だけ入力します。</p></div><button data-x>×</button></header><div class="create-body"><aside id="ccAside"></aside><section class="create-form" id="ccForm"></section></div></div>`);
+  w.querySelector('[data-x]').onclick = () => w.remove();
+  const aside = w.querySelector('#ccAside'), form = w.querySelector('#ccForm');
+  const renderAside = () => { aside.innerHTML = CREATE_KINDS.map(k => `<button class="${kind === k.id ? 'active' : ''}" data-k="${k.id}"><i>${k.icon}</i><span><strong>${k.label}</strong><small>${k.note}</small></span><b>›</b></button>`).join(''); aside.querySelectorAll('[data-k]').forEach(b => b.onclick = () => { kind = b.dataset.k; renderAside(); renderForm(); }); };
+  const companyOptions = () => state.companies.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const activityOptions = () => state.activities.map(a => { const c = companyById(a.companyId); return `<option value="${a.id}">${esc(c ? c.name : '')} / ${esc(a.title)}</option>`; }).join('');
+  const renderForm = () => {
+    const sel = CREATE_KINDS.find(k => k.id === kind);
+    let body = '';
+    if (kind === 'company') body = `<label>企業名<input id="f_name" placeholder="例：〇〇株式会社" autofocus></label><label>マイページURL（任意）<input id="f_url" placeholder="https://..."></label>`;
+    else if (kind === 'activity') body = `<label>企業<div style="display:flex;gap:8px"><select id="f_comp"><option value="">＋ 新しい企業</option>${companyOptions()}</select></div></label><label id="f_newcompwrap">新しい企業名<input id="f_newcomp" placeholder="例：〇〇株式会社"></label><label>活動名<input id="f_title" placeholder="例：2027年 サマーインターン"></label><div class="input-grid"><label>種類<select id="f_type">${ACTIVITY_TYPES.map(t => `<option>${t}</option>`).join('')}</select></label><label>開催年<select id="f_year">${['2026', '2027', '2028', '2029'].map(y => `<option ${y === String(new Date().getFullYear()) ? 'selected' : ''}>${y}</option>`).join('')}</select></label></div>`;
+    else body = `<label>予定名<input id="f_title" placeholder="例：三菱商事 1次面接" autofocus></label><div class="input-grid"><label>日付<input type="date" id="f_date" value="${todayYMD()}"></label><label>時刻<input type="time" id="f_time"></label></div><label>企業・活動に紐づける（任意）<select id="f_act"><option value="">なし</option>${activityOptions()}</select></label>`;
+    form.innerHTML = `<div class="create-form-title"><i>${sel.icon}</i><div><span>NEW RECORD</span><h3>${sel.label}</h3></div></div>${body}<footer><button data-cancel>キャンセル</button><button data-save>${kind === 'schedule' ? '予定を追加' : '追加する'}</button></footer>`;
+    form.querySelector('[data-cancel]').onclick = () => w.remove();
+    if (kind === 'activity') { const cs = form.querySelector('#f_comp'); const nw = form.querySelector('#f_newcompwrap'); const upd = () => nw.style.display = cs.value ? 'none' : 'block'; cs.onchange = upd; upd(); }
+    form.querySelector('[data-save]').onclick = () => doCreate(kind, form, w);
   };
-  state.entries.unshift(entry);
-  save();
-  $('addOverlay').classList.remove('open');
-  renderHome();
-  if (entry.startDate && confirm('iOSカレンダーに追加しますか？\n（ダウンロードした .ics ファイルを開くとカレンダーに登録できます）')) {
-    downloadFile(`${entry.name}.ics`, entryToICS(entry), 'text/calendar;charset=utf-8');
-  }
-  openDetail(entry.id);
+  renderAside(); renderForm();
 }
-
-/* ============ 詳細 ============ */
-let currentId = null;
-let metaEditOpen = false;
-const openSteps = new Set();
-
-function getEntry() { return state.entries.find(e => e.id === currentId); }
-
-function openDetail(id) {
-  currentId = id;
-  metaEditOpen = false;
-  openSteps.clear();
-  renderDetail();
-  $('detailOverlay').classList.add('open');
-}
-
-function closeDetail() {
-  currentId = null;
-  if (companyFrom && state.entries.some(e => e.name.trim() === companyFrom)) {
-    renderCompany(companyFrom);
-    renderHome();
-    return;
-  }
-  companyFrom = null;
-  $('detailOverlay').classList.remove('open');
-  renderHome();
-}
-
-function renderDetail() {
-  const e = getEntry();
-  if (!e) return;
-
-  const statusBtn = (val, cls) =>
-    `<button class="status-tab ${e.status === val ? 'active-' + cls : ''}" onclick="setStatus('${val}')">${STATUS_LABEL[val]}</button>`;
-
-  const stepsHtml = e.steps.map(s => renderStep(s)).join('');
-  const addBtns = Object.keys(STEP_KINDS).map(k =>
-    `<button class="type-chip" onclick="addStep('${k}')">＋ ${k}</button>`).join('');
-
-  $('detailModal').innerHTML = `
-    <div class="detail-head">
-      <div>
-        <div class="detail-title">${esc(e.name)}</div>
-        ${e.subtitle ? `<div class="entry-sub" style="margin-bottom:4px">${esc(e.subtitle)}</div>` : ''}
-        <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
-        <button class="q-del" style="font-size:13px" onclick="toggleMetaEdit()" title="名前・活動名・種類を編集">✏️ 編集</button>
-      </div>
-      <button class="close-x" onclick="closeDetail()">✕</button>
-    </div>
-    ${metaEditOpen ? `
-    <div style="margin:14px 0; padding:14px; border:1px dashed var(--line); border-radius:10px">
-      <span class="mini-label">名前を変更</span>
-      <input type="text" id="editEntryName" value="${esc(e.name)}" style="margin-bottom:12px">
-      <span class="mini-label">活動名（例：1day仕事体験）</span>
-      <input type="text" data-efield="subtitle" value="${esc(e.subtitle || '')}" style="margin-bottom:12px">
-      <span class="mini-label">種類を変更</span>
-      <div class="type-options">
-        ${[...DEFAULT_TYPES, ...state.customTypes].map(t =>
-          `<button class="type-chip ${e.type === t ? 'selected' : ''}" onclick="setEntryType('${attrKey(t)}')"><span class="chip-dot ${typeClass(t)}"></span>${esc(t)}</button>`).join('')}
-      </div>
-      <div style="display:flex; gap:8px; margin-top:10px">
-        <input type="text" id="editCustomType" placeholder="新しい種類名を入力">
-        <button class="btn btn-outline" style="white-space:nowrap" onclick="addCustomTypeFromDetail()">追加</button>
-      </div>
-    </div>` : ''}
-    <div class="status-tabs">
-      ${statusBtn('ongoing', 'ongoing')}
-      ${statusBtn('upcoming', 'upcoming')}
-      ${statusBtn('done', 'done')}
-    </div>
-    <div style="margin-bottom:14px">
-      <span class="mini-label">日程</span>
-      <div class="dt-row">
-        <span class="dt-label">開始</span>
-        <input type="date" data-efield="startDate" value="${esc(e.startDate)}">
-        <input type="time" data-efield="time" value="${esc(e.time)}">
-      </div>
-      <div class="dt-row">
-        <span class="dt-label">終了</span>
-        <input type="date" data-efield="endDate" value="${esc(e.endDate)}">
-        <input type="time" data-efield="endTime" value="${esc(e.endTime)}">
-      </div>
-      <button class="btn btn-outline" style="margin-top:8px; font-size:13px" onclick="exportEntryToCalendar('${e.id}')">📅 iOSカレンダーに登録</button>
-    </div>
-    <div style="margin-bottom:14px">
-      <span class="mini-label">場所</span>
-      <div class="type-options" style="margin-bottom:8px">
-        <button class="type-chip ${!e.locType ? 'selected' : ''}" onclick="setLocType('')">なし</button>
-        <button class="type-chip ${e.locType === 'online' ? 'selected' : ''}" onclick="setLocType('online')">オンライン</button>
-        <button class="type-chip ${e.locType === 'offline' ? 'selected' : ''}" onclick="setLocType('offline')">対面</button>
-      </div>
-      ${e.locType ? `
-        <input type="text" data-efield="locValue" value="${esc(e.locValue)}"
-          placeholder="${e.locType === 'online' ? 'URLを貼り付け（Zoom・Teamsなど）' : '住所・会場名を貼り付け'}">
-        ${e.locType === 'online' && /^https?:\/\//.test(e.locValue || '') ? `<a class="loc-link" href="${esc(e.locValue)}" target="_blank" rel="noopener">🔗 リンクを開く</a>` : ''}
-        ${e.locType === 'offline' && e.locValue ? `<a class="loc-link" href="https://www.google.com/maps/search/${encodeURIComponent(e.locValue)}" target="_blank" rel="noopener">📍 地図で見る</a>` : ''}
-      ` : ''}
-    </div>
-    <div style="margin-bottom:18px">
-      <span class="mini-label">結果</span>
-      <div class="type-options">
-        ${MARKS.map(m => `<button class="type-chip ${(e.marks || []).includes(m) ? 'mark-on' : ''}" onclick="toggleMark('${m}')">${(e.marks || []).includes(m) ? '✓ ' : ''}${m}</button>`).join('')}
-      </div>
-    </div>
-    <div id="stepsArea">${stepsHtml || '<div class="empty-hint">下のボタンから選考ステップを追加しましょう</div>'}</div>
-    <div class="add-step-row">${addBtns}</div>
-    <div style="margin-top:22px">
-      <span class="mini-label">📝 振り返り</span>
-      <textarea data-efield="review" placeholder="全体の感想・学び・反省点など…">${esc(e.review)}</textarea>
-    </div>
-    <div style="margin-top:14px">
-      <span class="mini-label">💬 フィードバック</span>
-      <div class="type-options" style="margin-bottom:8px">
-        <button class="type-chip ${!e.hasFeedback ? 'selected' : ''}" onclick="setFeedback(false)">なし</button>
-        <button class="type-chip ${e.hasFeedback ? 'selected' : ''}" onclick="setFeedback(true)">あり</button>
-      </div>
-      ${e.hasFeedback ? `<textarea data-efield="feedback" placeholder="もらったフィードバックを記録…">${esc(e.feedback)}</textarea>` : ''}
-    </div>
-    ${companyInfoHTML(e.name.trim())}
-    <div class="detail-footer">
-      <button class="btn btn-danger-ghost" onclick="deleteEntry()">削除</button>
-      <button class="btn btn-primary" onclick="closeDetail()">閉じる</button>
-    </div>`;
-
-  bindDetailInputs();
-  bindCompanyInfo(e.name.trim());
-}
-
-function renderStep(s) {
-  const cfg = STEP_KINDS[s.kind] || { note: true };
-  const isOpen = openSteps.has(s.id);
-
-  let inner = `
-    <div class="step-datetime">
-      <input type="date" data-sid="${s.id}" data-field="date" value="${esc(s.date)}">
-      <input type="time" data-sid="${s.id}" data-field="time" value="${esc(s.time)}">
-    </div>`;
-
-  if (cfg.questions) {
-    const qLabel = s.kind === 'ES' ? '設問' : '質問';
-    inner += (s.questions || []).map((q, i) => `
-      <div class="q-item">
-        <div class="q-item-head">
-          <span class="q-num">${qLabel} ${i + 1}</span>
-          ${cfg.qTags ? `
-            <select class="q-tag-select ${q.tag === '本番' ? 'tag-honban' : 'tag-yosoku'}" data-sid="${s.id}" data-qid="${q.id}" data-field="tag">
-              <option value="予測" ${q.tag !== '本番' ? 'selected' : ''}>予測</option>
-              <option value="本番" ${q.tag === '本番' ? 'selected' : ''}>本番</option>
-            </select>` : ''}
-          <button class="q-del" onclick="deleteQuestion('${s.id}','${q.id}')">🗑</button>
-        </div>
-        <span class="mini-label">${qLabel}</span>
-        <textarea class="q-question" data-sid="${s.id}" data-qid="${q.id}" data-field="q" placeholder="${qLabel}内容を入力…">${esc(q.q)}</textarea>
-        <span class="mini-label">${s.kind === 'ES' ? '回答・メモ' : '自分の回答・メモ'}</span>
-        <textarea data-sid="${s.id}" data-qid="${q.id}" data-field="a" placeholder="回答やメモを入力…">${esc(q.a)}</textarea>
-        <div class="char-count">${(q.a || '').length}文字</div>
-      </div>`).join('');
-    inner += `<button class="add-mini-btn" onclick="addQuestion('${s.id}')">＋ ${qLabel}を追加</button>`;
-  }
-
-  if (cfg.note) {
-    inner += `
-      <div style="margin-top:12px">
-        <span class="mini-label">ノート</span>
-        <textarea data-sid="${s.id}" data-field="note" placeholder="メモ・感想・反省点など…">${esc(s.note)}</textarea>
-      </div>`;
-  }
-
-  return `
-    <div class="step-card ${isOpen ? 'open' : ''} ${s.done ? 'done' : ''}" id="step-${s.id}">
-      <div class="step-head" onclick="toggleStep('${s.id}')">
-        <div class="left">
-          <span class="chev">▶</span>
-          <button class="done-btn ${s.done ? 'on' : ''}" title="完了にする" onclick="event.stopPropagation(); toggleStepDone('${s.id}')">✓</button>
-          <span class="step-kind">${esc(s.kind)}</span>
-          <span class="step-date-label">${stepDateLabel(s)}</span>
-        </div>
-        <button class="q-del" onclick="event.stopPropagation(); deleteStep('${s.id}')">🗑</button>
-      </div>
-      <div class="step-body">${inner}</div>
-    </div>`;
-}
-
-/* 詳細モーダル内の入力を自動保存にひも付ける */
-function bindDetailInputs() {
-  // 名前（タイトルにも即時反映。マイページ情報も新しい名前へ引き継ぐ）
-  const nameEl = $('editEntryName');
-  if (nameEl) {
-    let prevKey = (getEntry()?.name || '').trim();
-    nameEl.addEventListener('input', () => {
-      const e = getEntry(); if (!e) return;
-      e.name = nameEl.value;
-      const newKey = nameEl.value.trim();
-      const othersUseOld = state.entries.some(x => x.id !== e.id && x.name.trim() === prevKey);
-      if (newKey && newKey !== prevKey && !othersUseOld && state.companies[prevKey] && !state.companies[newKey]) {
-        state.companies[newKey] = state.companies[prevKey];
-        delete state.companies[prevKey];
-      }
-      if (newKey) prevKey = newKey;
-      const title = document.querySelector('#detailModal .detail-title');
-      if (title) title.textContent = nameEl.value;
-      save();
-    });
-  }
-  // エントリー自体のフィールド
-  document.querySelectorAll('#detailModal [data-efield]').forEach(el => {
-    el.addEventListener('input', () => {
-      const e = getEntry(); if (!e) return;
-      e[el.dataset.efield] = el.value;
-      if (e.endDate && (!e.startDate || e.endDate <= e.startDate)) e.endDate = '';
-      save();
-      renderCalendar();
-    });
-  });
-  // ステップ・設問のフィールド
-  document.querySelectorAll('#detailModal [data-sid]').forEach(el => {
-    el.addEventListener('input', () => {
-      const e = getEntry(); if (!e) return;
-      const s = e.steps.find(x => x.id === el.dataset.sid); if (!s) return;
-      const f = el.dataset.field;
-      if (el.dataset.qid) {
-        const q = (s.questions || []).find(x => x.id === el.dataset.qid); if (!q) return;
-        q[f] = el.value;
-        if (f === 'a' && el.nextElementSibling && el.nextElementSibling.classList.contains('char-count')) {
-          el.nextElementSibling.textContent = `${el.value.length}文字`;
-        }
-        if (f === 'tag') {
-          el.classList.toggle('tag-honban', el.value === '本番');
-          el.classList.toggle('tag-yosoku', el.value !== '本番');
-        }
-      } else {
-        s[f] = el.value;
-        if (f === 'date' || f === 'time') {
-          const label = document.querySelector(`#step-${s.id} .step-date-label`);
-          if (label) label.textContent = stepDateLabel(s);
-          renderCalendar();
-        }
-      }
-      save();
-    });
-  });
-}
-
-/* 詳細モーダルの操作（inline onclickから呼ばれる） */
-function setStatus(val) { const e = getEntry(); if (e) { e.status = val; save(); renderDetail(); } }
-function toggleMetaEdit() { metaEditOpen = !metaEditOpen; renderDetail(); }
-function setEntryType(k) {
-  const e = getEntry(); if (!e) return;
-  e.type = decodeURIComponent(k);
-  save(); renderDetail();
-}
-function addCustomTypeFromDetail() {
-  const v = $('editCustomType').value.trim();
-  if (!v) return;
-  if (!DEFAULT_TYPES.includes(v) && !state.customTypes.includes(v)) state.customTypes.push(v);
-  const e = getEntry(); if (!e) return;
-  e.type = v;
-  save(); renderDetail();
-}
-function setFeedback(on) {
-  const e = getEntry(); if (!e) return;
-  e.hasFeedback = on;
-  save(); renderDetail();
-}
-function setLocType(val) {
-  const e = getEntry(); if (!e) return;
-  if (e.locType !== val) e.locValue = '';
-  e.locType = val;
-  save(); renderDetail();
-}
-function toggleMark(m) {
-  const e = getEntry(); if (!e) return;
-  e.marks = e.marks || [];
-  e.marks.includes(m) ? e.marks = e.marks.filter(x => x !== m) : e.marks.push(m);
-  save(); renderDetail();
-}
-function toggleStepDone(sid) {
-  const e = getEntry(); if (!e) return;
-  const s = e.steps.find(x => x.id === sid); if (!s) return;
-  s.done = !s.done;
-  save();
-  const card = $('step-' + sid);
-  card.classList.toggle('done', s.done);
-  card.querySelector('.done-btn').classList.toggle('on', s.done);
-}
-function toggleStep(sid) {
-  openSteps.has(sid) ? openSteps.delete(sid) : openSteps.add(sid);
-  $('step-' + sid).classList.toggle('open');
-}
-function addStep(kind) {
-  const e = getEntry(); if (!e) return;
-  const s = { id: uid(), kind, date: todayYMD(), time: '', note: '', questions: [] };
-  e.steps.push(s);
-  openSteps.add(s.id);
-  save();
-  renderDetail();
-}
-function deleteStep(sid) {
-  if (!confirm('このステップを削除しますか？')) return;
-  const e = getEntry(); if (!e) return;
-  e.steps = e.steps.filter(s => s.id !== sid);
-  save(); renderDetail();
-}
-function addQuestion(sid) {
-  const e = getEntry(); if (!e) return;
-  const s = e.steps.find(x => x.id === sid); if (!s) return;
-  (s.questions = s.questions || []).push({ id: uid(), q: '', a: '', tag: '予測' });
-  save(); renderDetail();
-}
-function deleteQuestion(sid, qid) {
-  const e = getEntry(); if (!e) return;
-  const s = e.steps.find(x => x.id === sid); if (!s) return;
-  s.questions = (s.questions || []).filter(q => q.id !== qid);
-  save(); renderDetail();
-}
-function deleteEntry() {
-  const e = getEntry(); if (!e) return;
-  if (!confirm(`「${e.name}」を削除しますか？この操作は取り消せません。`)) return;
-  state.entries = state.entries.filter(x => x.id !== currentId);
-  save(); closeDetail();
-}
-
-/* ============ 企業ページ（同名エントリーのまとめ） ============ */
-let companyFrom = null;
-
-function openCompany(key) {
-  const name = decodeURIComponent(key);
-  companyFrom = name;
-  renderCompany(name);
-  $('detailOverlay').classList.add('open');
-}
-
-function closeCompany() {
-  companyFrom = null;
-  $('detailOverlay').classList.remove('open');
-  renderHome();
-}
-
-function renderCompany(name) {
-  const list = state.entries.filter(e => e.name.trim() === name);
-  const order = { ongoing: 0, upcoming: 1, done: 2 };
-  list.sort((a, b) => order[a.status] - order[b.status] || (a.startDate || '9').localeCompare(b.startDate || '9'));
-  $('detailModal').innerHTML = `
-    <div class="detail-head">
-      <div>
-        <div class="detail-title">${esc(name)}</div>
-        <span class="mini-label">${list.length}件の記録</span>
-      </div>
-      <button class="close-x" onclick="closeCompany()">✕</button>
-    </div>
-    <div style="margin-top:14px">
-      ${list.map(e => {
-        const done = e.steps.filter(s => s.done).length;
-        return `<div class="company-row" onclick="openDetail('${e.id}')">
-          <span class="type-badge ${typeClass(e.type)}">${esc(e.type)}</span>
-          <span class="status-mini s-${e.status}">${STATUS_LABEL[e.status]}</span>
-          ${e.subtitle ? `<span style="font-size:12.5px; font-weight:600">${esc(e.subtitle)}</span>` : ''}
-          ${entryDateLabel(e) ? `<span style="font-size:12px;color:var(--sub)">📅 ${entryDateLabel(e)}</span>` : ''}
-          <span style="margin-left:auto; display:flex; gap:6px; align-items:center">
-            ${(e.marks || []).map(mk => `<span class="result-badge">✓ ${esc(mk)}</span>`).join('')}
-            <span style="font-size:12px;color:var(--sub)">📋 ${done}/${e.steps.length}</span>
-          </span>
-        </div>`;
-      }).join('')}
-    </div>
-    ${companyInfoHTML(name)}
-    <div class="detail-footer" style="justify-content:flex-end">
-      <button class="btn btn-primary" onclick="closeCompany()">閉じる</button>
-    </div>`;
-  bindCompanyInfo(name);
-}
-
-/* ============ カレンダー ============ */
-let calYear, calMonth, selectedDay = null;
-{
-  const now = new Date();
-  calYear = now.getFullYear();
-  calMonth = now.getMonth();
-}
-
-function allEvents() {
-  const evs = [];
-  state.entries.forEach(e => {
-    if (e.startDate) {
-      const end = (e.endDate && e.endDate > e.startDate) ? e.endDate : e.startDate;
-      const isRange = end !== e.startDate;
-      let d = new Date(e.startDate + 'T00:00:00');
-      const endD = new Date(end + 'T00:00:00');
-      let guard = 0;
-      while (d <= endD && guard++ < 92) {
-        const ds = ymd(d);
-        evs.push({
-          date: ds, time: ds === e.startDate ? ((e.time || '') + (!isRange && e.time && e.endTime ? '〜' + e.endTime : '')) : '',
-          name: e.name, kind: e.type, sub: e.subtitle || '', entryId: e.id,
-          isEntry: true, isRange,
-          rangePos: !isRange ? '' : ds === e.startDate ? 'start' : ds === end ? 'end' : 'mid',
-          rangeLabel: isRange ? `${fmtMD(e.startDate)}〜${fmtMD(end)}` : '',
-        });
-        d.setDate(d.getDate() + 1);
-      }
-    }
-    e.steps.forEach(s => {
-      if (s.date) evs.push({ date: s.date, time: s.time || '', name: e.name, kind: s.kind, entryId: e.id });
-    });
-  });
-  evs.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  return evs;
-}
-
-function renderCalendar() {
-  const grid = $('calGrid');
-  $('calTitle').textContent = `${calYear}年 ${calMonth + 1}月`;
-
-  const byDate = {};
-  allEvents().forEach(ev => (byDate[ev.date] = byDate[ev.date] || []).push(ev));
-
-  const dows = ['日', '月', '火', '水', '木', '金', '土'];
-  let html = dows.map((d, i) =>
-    `<div class="cal-dow ${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${d}</div>`).join('');
-
-  const first = new Date(calYear, calMonth, 1);
-  const start = new Date(first);
-  start.setDate(1 - first.getDay());
-  const today = todayYMD();
-
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(start);
-    d.setDate(start.getDate() + i);
-    const ds = ymd(d);
-    const other = d.getMonth() !== calMonth;
-    const dayEvs = byDate[ds] || [];
-    const shown = dayEvs.slice(0, 2);
-    html += `<div class="cal-cell ${other ? 'other-month' : ''} ${ds === today ? 'today' : ''} ${ds === selectedDay ? 'selected' : ''}" data-date="${ds}">
-      <span class="day-num">${d.getDate()}</span>
-      ${shown.map(ev => `<div class="cal-ev ${ev.isEntry ? 'entry ' + typeClass(ev.kind) : ''} ${ev.rangePos === 'mid' ? 'range-mid' : ''}">${ev.rangePos === 'mid' || ev.rangePos === 'end' ? '┈ ' : ''}${esc(ev.name)}</div>`).join('')}
-      ${dayEvs.length > 2 ? `<div class="cal-ev more">他${dayEvs.length - 2}件</div>` : ''}
-    </div>`;
-  }
-  grid.innerHTML = html;
-  grid.querySelectorAll('.cal-cell').forEach(c => {
-    c.onclick = () => { selectedDay = c.dataset.date; renderCalendar(); };
-  });
-
-  const panel = $('dayEvents');
-  if (selectedDay) {
-    const dayEvs = byDate[selectedDay] || [];
-    panel.style.display = '';
-    panel.innerHTML = `<h3>${fmtDate(selectedDay)} の予定</h3>` +
-      (dayEvs.length
-        ? dayEvs.map(ev => `<div class="day-ev-item" onclick="openDetail('${ev.entryId}')">
-            <span class="day-ev-time">${ev.isRange ? '期間' : (ev.time || '--:--')}</span>
-            <div><div class="day-ev-name">${esc(ev.name)}</div><div class="day-ev-kind">${esc(ev.kind)}${ev.sub ? '・' + esc(ev.sub) : ''}${ev.rangeLabel ? '・' + ev.rangeLabel : ''}</div></div>
-          </div>`).join('')
-        : '<div class="no-events">この日の予定はありません</div>');
+function doCreate(kind, form, w) {
+  const val = id => { const el = form.querySelector('#' + id); return el ? el.value.trim() : ''; };
+  if (kind === 'company') {
+    const name = val('f_name'); if (!name) return alert('企業名を入力してください');
+    const c = { id: uid(), name, officialName: '', industry: '', subIndustry: '', headquarters: '', founded: '', employees: '', businessScale: '', description: '', links: [], researchNote: '', memo: '', mypage: { url: val('f_url'), loginId: '', password: '', note: '' } };
+    state.companies.push(c); save(); w.remove(); openCompany(c.id);
+  } else if (kind === 'activity') {
+    let cid = form.querySelector('#f_comp').value;
+    if (!cid) { const nm = val('f_newcomp'); if (!nm) return alert('企業名を入力してください'); const c = { id: uid(), name: nm, officialName: '', industry: '', subIndustry: '', headquarters: '', founded: '', employees: '', businessScale: '', description: '', links: [], researchNote: '', memo: '', mypage: { url: '', loginId: '', password: '', note: '' } }; state.companies.push(c); cid = c.id; }
+    const type = form.querySelector('#f_type').value; const year = form.querySelector('#f_year').value;
+    const title = val('f_title') || `${year}年 ${seasonOf(type, '')}${type}`;
+    const a = { id: uid(), companyId: cid, title, type, cohort: COHORT, year, season: seasonOf(type, ''), status: '未着手', marks: [], startDate: '', endDate: '', time: '', endTime: '', locType: '', locValue: '', review: '', feedback: '', steps: [] };
+    state.activities.push(a); save(); w.remove(); openCompany(cid, a.id);
   } else {
-    panel.style.display = 'none';
+    const title = val('f_title'); if (!title) return alert('予定名を入力してください');
+    state.schedules.push({ id: uid(), title, date: val('f_date') || todayYMD(), time: val('f_time'), activityId: form.querySelector('#f_act').value });
+    save(); w.remove(); flash('予定を追加しました'); renderContent();
   }
 }
 
-/* ============ バックアップ（エクスポート／インポート） ============ */
-function exportBackup() {
-  downloadFile(`syuukatsu-kiroku-${todayYMD()}.json`, JSON.stringify(state, null, 2), 'application/json');
+/* ---- 活動追加（企業内） ---- */
+function openActivityAdd(cid) {
+  const w = openModal(`<div class="activity-add-modal"><div class="flow-editor-head"><div><span>NEW ACTIVITY</span><h2>活動・選考を追加</h2><p>卒業年度とは別に、実際の開催年を記録します。</p></div><button data-x>×</button></div>
+    <div class="activity-form"><div class="cohort-notice"><span>対象</span><strong>${COHORT}</strong><p id="ay">開催年：${new Date().getFullYear()}年</p></div>
+      <div class="activity-form-grid"><label>開催年<select id="a_year">${['2026', '2027', '2028', '2029'].map(y => `<option ${y === String(new Date().getFullYear()) ? 'selected' : ''}>${y}</option>`).join('')}</select></label><label>シーズン<select id="a_season">${SEASONS.map(s => `<option>${s}</option>`).join('')}</select></label></div>
+      <label>活動種類<select id="a_type">${ACTIVITY_TYPES.map(t => `<option>${t}</option>`).join('')}</select></label>
+      <label>表示名<input id="a_title" placeholder="例：2027年 サマーインターン"></label>
+      <label>最初の予定・締切（任意）<input id="a_date" type="date"></label>
+      <div class="activity-name-preview"><span>表示プレビュー</span><strong id="a_prev">2027年 サマーインターン</strong><p><i>${COHORT}</i><i id="a_pt">インターン</i><i id="a_py">2027年</i><i id="a_ps">サマー</i></p></div>
+    </div>
+    <footer class="step-editor-actions"><button data-x>キャンセル</button><button data-save>追加する</button></footer></div>`);
+  const q = s => w.querySelector(s);
+  const upd = () => { const y = q('#a_year').value, se = q('#a_season').value, ty = q('#a_type').value; q('#ay').textContent = `開催年：${y}年`; q('#a_pt').textContent = ty; q('#a_py').textContent = y + '年'; q('#a_ps').textContent = se; q('#a_prev').textContent = q('#a_title').value.trim() || `${y}年 ${se}${ty}`; };
+  w.querySelectorAll('#a_year,#a_season,#a_type,#a_title').forEach(el => el.addEventListener('input', upd)); upd();
+  w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => w.remove());
+  q('[data-save]').onclick = () => {
+    const y = q('#a_year').value, se = q('#a_season').value, ty = q('#a_type').value;
+    const title = q('#a_title').value.trim() || `${y}年 ${se}${ty}`;
+    const a = { id: uid(), companyId: cid, title, type: ty, cohort: COHORT, year: y, season: se, status: '未着手', marks: [], startDate: q('#a_date').value || '', endDate: '', time: '', endTime: '', locType: '', locValue: '', review: '', feedback: '', steps: [] };
+    state.activities.push(a); save(); w.remove(); wsActivityId = a.id; renderWorkspace();
+  };
 }
 
-function importBackup(file) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const data = JSON.parse(reader.result);
-      if (!data || !Array.isArray(data.entries)) throw new Error('invalid');
-      if (!confirm(`バックアップから ${data.entries.length} 件の記録を読み込みます。\n現在のデータは上書きされます。よろしいですか？`)) return;
-      state = normalize(data);
-      save();
-      renderHome();
-      $('backupOverlay').classList.remove('open');
-      alert('読み込みが完了しました');
-    } catch (err) {
-      alert('ファイルを読み込めませんでした。エクスポートしたJSONファイルを選んでください。');
-    }
-  };
-  reader.readAsText(file);
+/* ---- マイページ編集 ---- */
+function openMypageEditor(cid) {
+  const co = companyById(cid); const m = { ...co.mypage };
+  let vis = false;
+  const w = openModal(`<div class="mypage-editor-modal"><div class="flow-editor-head"><div><span>MY PAGE SETTINGS</span><h2>マイページ情報を編集</h2><p>ログインに必要な情報を企業単位でまとめます。</p></div><button data-x>×</button></div>
+    <div class="mypage-editor-fields"><div class="mypage-warning"><strong>端末内保存</strong><p>情報はこのブラウザ内に保存されます。共用端末ではパスワードを登録しないでください。</p></div>
+      <label>マイページURL<input id="m_url" value="${esc(m.url)}" placeholder="https://..."></label>
+      <label>ログインID<input id="m_id" value="${esc(m.loginId)}"></label>
+      <label>パスワード<div class="password-input"><input id="m_pw" type="password" value="${esc(m.password)}"><button data-pw>表示</button></div></label>
+      <label>ログインメモ<textarea id="m_note" placeholder="登録メール、二段階認証など">${esc(m.note)}</textarea></label></div>
+    <footer class="step-editor-actions"><button data-x>キャンセル</button><button data-save>保存する</button></footer></div>`);
+  w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => w.remove());
+  w.querySelector('[data-pw]').onclick = () => { vis = !vis; const i = w.querySelector('#m_pw'); i.type = vis ? 'text' : 'password'; w.querySelector('[data-pw]').textContent = vis ? '隠す' : '表示'; };
+  w.querySelector('[data-save]').onclick = () => { co.mypage = { url: w.querySelector('#m_url').value.trim(), loginId: w.querySelector('#m_id').value.trim(), password: w.querySelector('#m_pw').value, note: w.querySelector('#m_note').value.trim() }; save(); w.remove(); renderWorkspace(); };
 }
 
-/* ============ テーマ ============ */
-let theme = localStorage.getItem(THEME_KEY)
-  || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-
-function applyTheme(t) {
-  document.body.classList.toggle('dark', t === 'dark');
-  $('themeBtn').textContent = t === 'dark' ? '☀' : '🌙';
+/* ---- 企業情報編集 ---- */
+function openProfileEditor(cid) {
+  const co = companyById(cid); const d = { ...co };
+  const w = openModal(`<div class="profile-editor-modal"><div class="flow-editor-head"><div><span>COMPANY PROFILE</span><h2>企業基本情報を編集</h2><p>業界や基本情報を記録します。</p></div><button data-x>×</button></div>
+    <div class="profile-editor-body">
+      <label>企業名<input id="p_name" value="${esc(co.name)}"></label>
+      <label>正式企業名<input id="p_official" value="${esc(co.officialName)}"></label>
+      <div class="profile-two-col"><label>業界<input id="p_industry" value="${esc(co.industry)}"></label><label>細分業界<input id="p_sub" value="${esc(co.subIndustry)}"></label><label>本社所在地<input id="p_hq" value="${esc(co.headquarters)}"></label><label>創立<input id="p_founded" value="${esc(co.founded)}"></label><label>従業員数<input id="p_emp" value="${esc(co.employees)}"></label><label>事業体制<input id="p_scale" value="${esc(co.businessScale)}"></label></div>
+      <label>企業紹介<textarea id="p_desc">${esc(co.description)}</textarea></label>
+    </div>
+    <footer class="step-editor-actions"><button data-x>キャンセル</button><button data-save>保存する</button></footer></div>`);
+  w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => w.remove());
+  w.querySelector('[data-save]').onclick = () => {
+    const g = id => w.querySelector('#' + id).value.trim();
+    Object.assign(co, { name: g('p_name') || co.name, officialName: g('p_official'), industry: g('p_industry'), subIndustry: g('p_sub'), headquarters: g('p_hq'), founded: g('p_founded'), employees: g('p_emp'), businessScale: g('p_scale'), description: g('p_desc') });
+    save(); w.remove(); renderWorkspace();
+  };
 }
 
-/* ============ 統計の折りたたみ ============ */
-const STATS_KEY = 'syuukatsu-stats-collapsed';
-let statsCollapsed = localStorage.getItem(STATS_KEY) === '1';
-
-function applyStatsCollapse() {
-  $('statsToggle').classList.toggle('collapsed', statsCollapsed);
-  $('statsArea').style.display = statsCollapsed ? 'none' : '';
+/* ---- フロー編集 ---- */
+function openFlowEditor(aid) {
+  const a = activityById(aid);
+  const w = openModal('');
+  const render = () => {
+    w.innerHTML = `<div class="flow-editor"><div class="flow-editor-head"><div><span>FLOW EDITOR</span><h2>選考フローを編集</h2><p>ステップの追加、並べ替え、日程の編集ができます。</p></div><button data-x>×</button></div>
+      <section class="preset-section"><h3>ステップを追加</h3><div class="preset-chips">${STEP_PRESETS.map(l => `<button data-add="${esc(l)}">＋ ${l}</button>`).join('')}</div><div class="custom-step"><input id="fe_custom" placeholder="カスタムステップ名"><button data-addcustom>追加</button></div></section>
+      <section class="editor-list-section"><div><h3>現在のフロー</h3><span>${a.steps.length}ステップ</span></div><div class="editor-step-list">${a.steps.map((s, i) => `<div class="editor-step"><i>${i + 1}</i><input value="${esc(s.label)}" data-lbl="${s.id}"><input class="editor-date" value="${esc(s.date)}" data-date="${s.id}" placeholder="日程 (2027-07-20)"><div class="editor-controls"><button data-up="${s.id}" ${i === 0 ? 'disabled' : ''}>↑</button><button data-down="${s.id}" ${i === a.steps.length - 1 ? 'disabled' : ''}>↓</button><button class="delete" data-del="${s.id}" ${a.steps.length === 1 ? 'disabled' : ''}>×</button></div></div>`).join('')}</div></section>
+      <footer class="flow-editor-actions"><p>変更はすぐ反映されます。</p><button data-x>完了</button></footer></div>`;
+    w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => { w.remove(); renderFlow(); });
+    const addStep = label => { const st = { id: uid(), label, status: 'pending', date: '', deadline: '', note: '', esQuestions: [], record: { format: '', participants: '', theme: '', role: '', note: '', feedback: '', questions: [] } }; a.steps.push(st); flowStepId = st.id; save(); render(); };
+    w.querySelectorAll('[data-add]').forEach(b => b.onclick = () => addStep(b.dataset.add));
+    w.querySelector('[data-addcustom]').onclick = () => { const v = w.querySelector('#fe_custom').value.trim(); if (v) addStep(v); };
+    w.querySelectorAll('[data-lbl]').forEach(el => el.addEventListener('input', () => { const s = a.steps.find(x => x.id === el.dataset.lbl); if (s) { s.label = el.value; save(); } }));
+    w.querySelectorAll('[data-date]').forEach(el => el.addEventListener('input', () => { const s = a.steps.find(x => x.id === el.dataset.date); if (s) { s.date = el.value; save(); } }));
+    w.querySelectorAll('[data-up]').forEach(b => b.onclick = () => { const i = a.steps.findIndex(x => x.id === b.dataset.up); if (i > 0) { [a.steps[i - 1], a.steps[i]] = [a.steps[i], a.steps[i - 1]]; save(); render(); } });
+    w.querySelectorAll('[data-down]').forEach(b => b.onclick = () => { const i = a.steps.findIndex(x => x.id === b.dataset.down); if (i < a.steps.length - 1) { [a.steps[i + 1], a.steps[i]] = [a.steps[i], a.steps[i + 1]]; save(); render(); } });
+    w.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { if (a.steps.length === 1) return; a.steps = a.steps.filter(x => x.id !== b.dataset.del); if (flowStepId === b.dataset.del) flowStepId = a.steps[0].id; save(); render(); });
+  };
+  render();
 }
 
-/* ============ グローバル公開（inline onclick用） ============ */
-Object.assign(window, {
-  openDetail, closeDetail, openCompany, closeCompany,
-  setStatus, toggleMetaEdit, setEntryType, addCustomTypeFromDetail,
-  setFeedback, setLocType, toggleMark,
-  addStep, deleteStep, toggleStep, toggleStepDone,
-  addQuestion, deleteQuestion, deleteEntry,
-  exportEntryToCalendar, togglePw,
-});
+/* ---- ステップ編集 ---- */
+function openStepEditor(aid, sid) {
+  const a = activityById(aid); const s = a.steps.find(x => x.id === sid);
+  const w = openModal(`<div class="step-editor-modal"><div class="flow-editor-head"><div><span>STEP SETTINGS</span><h2>${esc(s.label)}を編集</h2><p>日程、締切、メモを設定します。</p></div><button data-x>×</button></div>
+    <div class="step-editor-fields"><label>ステップ名<input id="s_label" value="${esc(s.label)}"></label>
+      <div class="step-editor-date-grid"><label>日程<input id="s_date" type="date" value="${esc(s.date)}"></label><label>締切（任意）<input id="s_deadline" value="${esc(s.deadline)}" placeholder="例：2027-07-16 23:59"></label></div>
+      <label>メモ<textarea id="s_note">${esc(s.note)}</textarea></label></div>
+    <footer class="step-editor-actions"><button data-x>キャンセル</button><button data-save>保存する</button></footer></div>`);
+  w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => w.remove());
+  w.querySelector('[data-save]').onclick = () => { s.label = w.querySelector('#s_label').value.trim() || s.label; s.date = w.querySelector('#s_date').value; s.deadline = w.querySelector('#s_deadline').value.trim(); s.note = w.querySelector('#s_note').value; save(); w.remove(); renderFlow(); };
+}
 
-/* ============ イベント登録・初期化 ============ */
-function initEvents() {
-  /* ヘッダー */
-  $('openAddBtn').onclick = openAddModal;
-  $('themeBtn').onclick = () => {
-    theme = theme === 'dark' ? 'light' : 'dark';
-    try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
-    applyTheme(theme);
+/* ---- ES設問編集 ---- */
+function openESEditor(aid, sid, qid) {
+  const a = activityById(aid); const s = a.steps.find(x => x.id === sid);
+  const q = qid ? s.esQuestions.find(x => x.id === qid) : { id: uid(), question: '', answer: '', limit: 400 };
+  const d = { ...q };
+  const w = openModal(`<div class="es-editor-modal"><div class="flow-editor-head"><div><span>ES QUESTION</span><h2>ES設問・回答を編集</h2><p>回答文字数はリアルタイムで計算されます。</p></div><button data-x>×</button></div>
+    <div class="es-editor-fields"><label>設問<textarea id="e_q" placeholder="企業から提示された設問">${esc(d.question)}</textarea></label>
+      <label class="limit-label">文字数上限<input id="e_limit" type="number" min="1" value="${d.limit}"></label>
+      <label>回答<textarea class="answer-field" id="e_a" placeholder="回答を入力">${esc(d.answer)}</textarea></label>
+      <div class="live-counter" id="e_counter"></div></div>
+    <footer class="step-editor-actions"><button data-x>キャンセル</button><button data-save>保存する</button></footer></div>`);
+  const upd = () => { const len = w.querySelector('#e_a').value.length; const lim = Math.max(1, Number(w.querySelector('#e_limit').value) || 1); const rem = lim - len; const box = w.querySelector('#e_counter'); box.className = 'live-counter' + (rem < 0 ? ' over' : ''); box.innerHTML = `<span>${len} / ${lim}字</span><strong>${rem >= 0 ? '残り' + rem + '字' : Math.abs(rem) + '字オーバー'}</strong>`; };
+  w.querySelectorAll('#e_a,#e_limit').forEach(el => el.addEventListener('input', upd)); upd();
+  w.querySelectorAll('[data-x]').forEach(b => b.onclick = () => w.remove());
+  w.querySelector('[data-save]').onclick = () => {
+    const nq = { id: d.id, question: w.querySelector('#e_q').value, answer: w.querySelector('#e_a').value, limit: Math.max(1, Number(w.querySelector('#e_limit').value) || 400) };
+    if (qid) { const idx = s.esQuestions.findIndex(x => x.id === qid); s.esQuestions[idx] = nq; } else s.esQuestions.push(nq);
+    save(); w.remove(); renderFlow();
   };
+}
 
-  /* 新規追加モーダル */
-  $('addCancel').onclick = () => $('addOverlay').classList.remove('open');
-  $('addSave').onclick = saveNewEntry;
-  $('addName').addEventListener('input', renderNameSuggest);
-  $('addName').addEventListener('blur', () => setTimeout(() => { $('nameSuggest').style.display = 'none'; }, 150));
-  /* 開始日を入れたら終了日の初期値も合わせる（Appleカレンダー風） */
-  $('addStartDate').addEventListener('change', ev => {
-    const end = $('addEndDate');
-    if (ev.target.value && (!end.value || end.value < ev.target.value)) end.value = ev.target.value;
-  });
-  document.querySelectorAll('#locOptions .type-chip').forEach(b => {
-    b.onclick = () => { selectedLoc = b.dataset.loc; updateLocUI(); };
-  });
-  /* overlay クリックで閉じる（追加モーダルのみ。詳細は誤操作防止のため×ボタンで） */
-  $('addOverlay').addEventListener('click', ev => {
-    if (ev.target === ev.currentTarget) ev.currentTarget.classList.remove('open');
-  });
+/* ============ テーマ・検索 ============ */
+let theme = localStorage.getItem(THEME_KEY) || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+function applyTheme() { $('app').classList.toggle('theme-dark', theme === 'dark'); const b = $('themeBtn'); b.innerHTML = theme === 'dark' ? '<span>☀</span>ライトモード' : '<span>☾</span>ダークモード'; }
 
-  /* バックアップモーダル */
-  $('openBackupBtn').onclick = () => $('backupOverlay').classList.add('open');
-  $('backupClose').onclick = () => $('backupOverlay').classList.remove('open');
-  $('backupOverlay').addEventListener('click', ev => {
-    if (ev.target === ev.currentTarget) ev.currentTarget.classList.remove('open');
+/* ============ 初期化 ============ */
+function init() {
+  document.querySelectorAll('#sideNav .nav-item, #bottomNav button[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
+  $('bottomAdd').onclick = openCreateCenter;
+  $('themeBtn').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME_KEY, theme); } catch (e) {} applyTheme(); };
+  $('searchInput').addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    if (currentView !== 'home') setView('home');
+    // 簡易検索：企業名・活動名で絞り込み → ホームカードは企業ベースなので companies をフィルタ
+    homeSearch = q; renderContent();
   });
-  $('exportBtn').onclick = exportBackup;
-  $('importBtn').onclick = () => $('importFile').click();
-  $('importFile').addEventListener('change', ev => {
-    const file = ev.target.files[0];
-    ev.target.value = '';
-    if (file) importBackup(file);
-  });
-
-  /* 検索 */
-  $('searchInput').addEventListener('input', ev => {
-    searchQuery = ev.target.value.trim();
-    renderHome();
-  });
-
-  /* 統計の折りたたみ */
-  $('statsToggle').onclick = () => {
-    statsCollapsed = !statsCollapsed;
-    try { localStorage.setItem(STATS_KEY, statsCollapsed ? '1' : '0'); } catch (e) {}
-    applyStatsCollapse();
-  };
-
-  /* カレンダー */
-  $('calPrev').onclick = () => { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendar(); };
-  $('calNext').onclick = () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendar(); };
-  $('calToday').onclick = () => {
-    const now = new Date();
-    calYear = now.getFullYear(); calMonth = now.getMonth();
-    selectedDay = todayYMD();
-    renderCalendar();
-  };
-
-  /* ページを離れる・バックグラウンドに回る瞬間にも念のため保存（iOS Safari対策） */
-  const flush = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {} };
+  const flush = () => saveNow();
   window.addEventListener('pagehide', flush);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+  applyTheme();
+  setView('home');
 }
+let homeSearch = '';
+// ホーム検索をカード表示に反映（primaryActivity 経由なので companies を絞る）
+const _origRenderHome = renderHome;
+renderHome = function (c) {
+  if (!homeSearch) return _origRenderHome(c);
+  const q = homeSearch;
+  const saved = state.companies;
+  const filteredCompanies = saved.filter(co => co.name.toLowerCase().includes(q) || activitiesOf(co.id).some(a => (a.title + ' ' + a.type).toLowerCase().includes(q)));
+  const tmp = Object.create(state);
+  // 一時的に companies を差し替えて描画（activities はそのまま、primaryActivity は companyId 参照で安全）
+  const origCompanies = state.companies;
+  state.companies = filteredCompanies;
+  _origRenderHome(c);
+  state.companies = origCompanies;
+};
 
-initEvents();
-applyTheme(theme);
-applyStatsCollapse();
-renderHome();
+init();
